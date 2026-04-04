@@ -1,16 +1,57 @@
-# React + Vite
+# Solar Potential Mapper MVP
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A demo-first web app that estimates additional rooftop solar capacity for a pilot city and visualizes the best candidate rooftops on an interactive map.
 
-Currently, two official plugins are available:
+## What it includes
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- React + Vite frontend dashboard
+- Local Node API with seeded pilot data for Coral Gables, Florida
+- Building-level solar estimates, confidence, and explainable opportunity scores
+- Ranked rooftop list and detail panel
+- Google Maps support when a key is available
+- Built-in fallback map preview so the demo still works without a key
 
-## React Compiler
+## Run locally
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Install dependencies if needed:
 
-## Expanding the ESLint configuration
+```bash
+npm install
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Start the API in one terminal:
+
+```bash
+npm run api
+```
+
+Start the frontend in a second terminal:
+
+```bash
+npm run dev
+```
+
+The Vite app proxies `/api/*` requests to `http://localhost:8787`.
+
+## Optional Google Maps setup
+
+Create a `.env` file and add:
+
+```bash
+VITE_GOOGLE_MAPS_API_KEY=your_google_maps_key
+```
+
+Without a key, the dashboard uses a built-in interactive fallback map so the rest of the product demo still works.
+
+## API endpoints
+
+- `GET /api/summary`
+- `GET /api/buildings`
+- `GET /api/buildings/:id`
+
+## Checks
+
+```bash
+npm run lint
+npm run build
+```
