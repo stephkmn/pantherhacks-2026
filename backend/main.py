@@ -1,15 +1,25 @@
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 import random
 from typing import Any
+from uuid import uuid4
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.data_store import (
+    DEFAULT_RADIUS_KM,
+    MAX_RADIUS_KM,
+    get_data_store,
+)
 from backend.yolo_integration import detect_trash_yolo_from_bytes
+
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 
 app = FastAPI(title="CleanSky AI API")
 
@@ -78,6 +88,76 @@ class ErrorEnvelope(BaseModel):
     error: dict[str, Any]
 
 
+class RoundStartRequest(BaseModel):
+    drone_round_id: str | None = None
+
+
+class RoundResponse(BaseModel):
+    id: str
+    started_at: datetime
+    ended_at: datetime | None
+    status: str
+
+
+class DronePositionUpsertRequest(BaseModel):
+    round_id: str
+    drone_id: str
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    recorded_at: datetime | None = None
+
+
+class DronePositionResponse(BaseModel):
+    round_id: str
+    drone_id: str
+    recorded_at: datetime
+    lat: float
+    lng: float
+
+
+class TrashEntryCreateRequest(BaseModel):
+    round_id: str
+    drone_id: str
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    size: int = Field(ge=1, le=10)
+    detected_at: datetime | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class TrashEntryResponse(BaseModel):
+    id: str
+    round_id: str
+    drone_id: str
+    detected_at: datetime
+    lat: float
+    lng: float
+    size: int
+    meta: dict[str, Any]
+
+
+class HotspotColor(str, Enum):
+    green = "green"
+    yellow = "yellow"
+    red = "red"
+
+
+class ZipHotspotResponse(BaseModel):
+    hotspot_id: str
+    lat: float
+    lng: float
+    pile_count: int
+    avg_size: float
+    total_size: int
+    score: float
+    color: HotspotColor
+    last_detected_at: datetime
+
+
+def _data_store():
+    return get_data_store()
+
+
 @app.exception_handler(RequestValidationError)
 async def request_validation_exception_handler(_, exc: RequestValidationError):
     return JSONResponse(
@@ -100,6 +180,108 @@ async def http_exception_handler(_, exc: HTTPException):
     else:
         error = {"code": "HTTP_ERROR", "message": str(detail)}
     return JSONResponse(status_code=exc.status_code, content={"error": error})
+
+
+@app.post("/api/rounds/start", response_model=RoundResponse)
+async def start_round(payload: RoundStartRequest):
+    round_id = payload.drone_round_id or f"round_{uuid4().hex[:12]}"
+    round_model = _data_store().start_new_round(round_id=round_id)
+    return RoundResponse(
+        id=round_model.id,
+        started_at=round_model.started_at,
+        ended_at=round_model.ended_at,
+        status=round_model.status,
+    )
+
+
+@app.post("/api/drone-position", response_model=DronePositionResponse)
+async def upsert_drone_position(payload: DronePositionUpsertRequest):
+    record = _data_store().upsert_drone_position(
+        round_id=payload.round_id,
+        drone_id=payload.drone_id,
+        lat=payload.lat,
+        lng=payload.lng,
+        recorded_at=payload.recorded_at,
+    )
+    return DronePositionResponse(
+        round_id=record.round_id,
+        drone_id=record.drone_id,
+        recorded_at=record.recorded_at,
+        lat=record.lat,
+        lng=record.lng,
+    )
+
+
+@app.post("/api/trash-entry", response_model=TrashEntryResponse)
+async def create_trash_entry(payload: TrashEntryCreateRequest):
+    record = _data_store().insert_trash_entry(
+        round_id=payload.round_id,
+        drone_id=payload.drone_id,
+        lat=payload.lat,
+        lng=payload.lng,
+        size=payload.size,
+        detected_at=payload.detected_at,
+        meta=payload.meta,
+    )
+    return TrashEntryResponse(
+        id=record.id,
+        round_id=record.round_id,
+        drone_id=record.drone_id,
+        detected_at=record.detected_at,
+        lat=record.lat,
+        lng=record.lng,
+        size=record.size,
+        meta=record.meta,
+    )
+
+
+@app.get("/api/hotspots", response_model=list[ZipHotspotResponse])
+async def get_hotspots(zip: str, radius_km: float = DEFAULT_RADIUS_KM):
+    if radius_km <= 0 or radius_km > MAX_RADIUS_KM:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INVALID_RADIUS",
+                "message": f"radius_km must be between 0 and {MAX_RADIUS_KM}.",
+            },
+        )
+
+    zip_code = zip.strip()
+    try:
+        hotspots = _data_store().get_hotspots_by_zip(zip_code=zip_code, radius_km=radius_km)
+    except KeyError as exc:
+        if str(exc).strip("'") == "zip_not_found":
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "ZIP_NOT_FOUND",
+                    "message": f"ZIP code {zip_code} was not found in centroid lookup.",
+                },
+            ) from exc
+        raise
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "DATA_STORE_ERROR",
+                "message": str(exc),
+            },
+        ) from exc
+
+    return [
+        ZipHotspotResponse(
+            hotspot_id=item["hotspot_id"],
+            lat=item["lat"],
+            lng=item["lng"],
+            pile_count=item["pile_count"],
+            avg_size=item["avg_size"],
+            total_size=item["total_size"],
+            score=item["score"],
+            color=item["color"],
+            last_detected_at=datetime.fromisoformat(item["last_detected_at"]),
+        )
+        for item in hotspots
+    ]
 
 # Simulated trash detection (replace with real YOLO/Roboflow later)
 @app.post("/api/scan", response_model=list[TrashHotspot])
@@ -314,6 +496,10 @@ async def root():
         "message": "CleanSky AI - Trash Detection API",
         "version": "1.0.0",
         "endpoints": {
+            "start_round": "/api/rounds/start",
+            "drone_position": "/api/drone-position",
+            "trash_entry": "/api/trash-entry",
+            "hotspots": "/api/hotspots?zip=92801&radius_km=2.0",
             "scan": "/api/scan",
             "optimize_route": "/api/optimize-route",
             "detect_image": "/api/detect-image",

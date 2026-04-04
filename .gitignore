@@ -4,6 +4,9 @@ __pycache__
 node_modules
 venv
 .venv
+
 backend/tests/test_images/
 backend/tests/image_test_outputs/
 backend/models/
+
+supabase/
