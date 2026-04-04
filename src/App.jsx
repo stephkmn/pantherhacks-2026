@@ -1,43 +1,39 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { MapContainer, TileLayer, CircleMarker, Circle, Polyline, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Circle, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
 // ── Mock data ─────────────────────────────────────────────────────────────────
+const PLACEHOLDER_PHOTO = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='360' height='220'><rect width='100%25' height='100%25' fill='%231f2937'/><text x='50%25' y='46%25' fill='%23e5e7eb' font-size='18' text-anchor='middle' font-family='Arial'>Garbage Photo</text><text x='50%25' y='58%25' fill='%239ca3af' font-size='13' text-anchor='middle' font-family='Arial'>Placeholder</text></svg>";
 const MOCK_HOTSPOTS = [
   {
     id: 1, lat: 33.837, lng: -117.915, severity: 'high',
     name: 'Harbor Blvd Intersection', estimated_waste_kg: 18,
     cleanup_time_minutes: 20, waste_types: ['Plastic Bags', 'Fast Food', 'Bottles'],
-    confidence: 0.94,
     photo: 'https://images.unsplash.com/photo-1604187351574-c75ca79f5807?w=400&q=80'
   },
   {
     id: 2, lat: 33.835, lng: -117.913, severity: 'high',
     name: 'Ball Rd & State College', estimated_waste_kg: 14,
     cleanup_time_minutes: 18, waste_types: ['Cardboard', 'Cans'],
-    confidence: 0.88,
     photo: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400&q=80'
   },
   {
     id: 3, lat: 33.839, lng: -117.918, severity: 'medium',
     name: 'Anaheim Plaza Lot', estimated_waste_kg: 7,
     cleanup_time_minutes: 12, waste_types: ['Paper', 'Styrofoam'],
-    confidence: 0.81,
     photo: 'https://images.unsplash.com/photo-1530587191325-3db32d826c18?w=400&q=80'
   },
   {
     id: 4, lat: 33.833, lng: -117.911, severity: 'medium',
     name: 'Euclid St Corridor', estimated_waste_kg: 5,
     cleanup_time_minutes: 10, waste_types: ['Mixed Waste'],
-    confidence: 0.75,
     photo: 'https://images.unsplash.com/photo-1567613387979-af56736a89c6?w=400&q=80'
   },
   {
     id: 5, lat: 33.841, lng: -117.916, severity: 'low',
     name: 'Brookhurst Community Park', estimated_waste_kg: 2,
     cleanup_time_minutes: 5, waste_types: ['Organic', 'Paper'],
-    confidence: 0.71,
     photo: 'https://images.unsplash.com/photo-1573408301185-9519f94816b5?w=400&q=80'
   },
 ];
@@ -245,10 +241,6 @@ function PhotoModal({ hotspot, onClose }) {
               <span className="mstat-label">Cleanup</span>
               <span className="mstat-value">{hotspot.cleanup_time_minutes} min</span>
             </div>
-            <div className="modal-stat">
-              <span className="mstat-label">Confidence</span>
-              <span className="mstat-value">{(hotspot.confidence * 100).toFixed(0)}%</span>
-            </div>
           </div>
           <div className="modal-types">
             {hotspot.waste_types.map(t => (
@@ -358,9 +350,8 @@ function Dashboard() {
           `Avg size ${hotspot.avg_size}/10`,
           `Score ${hotspot.score}`,
         ],
-        confidence: 0.9,
         detected_at: hotspot.last_detected_at,
-        photo: MOCK_HOTSPOTS[idx % MOCK_HOTSPOTS.length].photo,
+        photo: hotspot.photo_url || PLACEHOLDER_PHOTO,
       }));
       setAllHotspots(scanned);
 
@@ -507,6 +498,15 @@ function Dashboard() {
                     fillOpacity={isSkipped ? 0.35 : 0.9}
                     eventHandlers={{ click: () => !isSkipped && setSelectedHotspot(h) }}
                   >
+                    <Tooltip direction="top" offset={[0, -8]} opacity={1}>
+                      <div style={{ width: 170 }}>
+                        <img
+                          src={h.photo || PLACEHOLDER_PHOTO}
+                          alt="Trash placeholder"
+                          style={{ width: '100%', borderRadius: 6, display: 'block' }}
+                        />
+                      </div>
+                    </Tooltip>
                     <Popup>
                       <div style={{ fontFamily: 'monospace', fontSize: 13 }}>
                         <strong>{h.name}</strong><br />
@@ -648,7 +648,6 @@ function Dashboard() {
                     <div className="hspot-meta">
                       <span>⚖️ {h.estimated_waste_kg} kg</span>
                       <span>⏱ {h.cleanup_time_minutes} min</span>
-                      <span>🎯 {(h.confidence * 100).toFixed(0)}%</span>
                     </div>
                     <div className="hspot-types">
                       {h.waste_types.map(t => <span key={t} className="wtype">{t}</span>)}

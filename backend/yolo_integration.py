@@ -21,6 +21,7 @@ TRASH_CLASSES = {
 }
 
 WEIGHT_ESTIMATES = {
+    "trash": 0.05,
     "plastic_bottle": 0.05,
     "glass_bottle": 0.3,
     "aluminum_can": 0.015,
@@ -152,10 +153,10 @@ def detect_trash_yolo_from_bytes(
 
         for result in results:
             for box in result.boxes:
-                class_id = int(box.cls[0])
                 confidence = float(box.conf[0])
                 bbox = [float(v) for v in box.xyxy[0].tolist()]
-                class_name = TRASH_CLASSES.get(class_id, model.names.get(class_id, "unknown"))
+                # Model currently treats all detections as generic trash.
+                class_name = "trash"
                 detections.append(
                     {
                         "class": class_name,

@@ -152,6 +152,7 @@ class ZipHotspotResponse(BaseModel):
     score: float
     color: HotspotColor
     last_detected_at: datetime
+    photo_url: str | None = None
 
 
 def _data_store():
@@ -279,6 +280,7 @@ async def get_hotspots(zip: str, radius_km: float = DEFAULT_RADIUS_KM):
             score=item["score"],
             color=item["color"],
             last_detected_at=datetime.fromisoformat(item["last_detected_at"]),
+            photo_url=item.get("photo_url"),
         )
         for item in hotspots
     ]
