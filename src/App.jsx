@@ -1,109 +1,258 @@
-import React, { useState } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Circle, Polyline, Popup } from 'react-leaflet';
+import React, { useState, useEffect, useRef } from 'react';
+import { MapContainer, TileLayer, CircleMarker, Circle, Polyline, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
-function App() {
-  const mapCenter = [33.8366, -117.9143]; // Anaheim
+// ── Mock data ─────────────────────────────────────────────────────────────────
+const MOCK_HOTSPOTS = [
+  {
+    id: 1, lat: 33.837, lng: -117.915, severity: 'high',
+    name: 'Harbor Blvd Intersection', estimated_waste_kg: 18,
+    cleanup_time_minutes: 20, waste_types: ['Plastic Bags', 'Fast Food', 'Bottles'],
+    confidence: 0.94,
+    photo: 'https://images.unsplash.com/photo-1604187351574-c75ca79f5807?w=400&q=80'
+  },
+  {
+    id: 2, lat: 33.835, lng: -117.913, severity: 'high',
+    name: 'Ball Rd & State College', estimated_waste_kg: 14,
+    cleanup_time_minutes: 18, waste_types: ['Cardboard', 'Cans'],
+    confidence: 0.88,
+    photo: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400&q=80'
+  },
+  {
+    id: 3, lat: 33.839, lng: -117.918, severity: 'medium',
+    name: 'Anaheim Plaza Lot', estimated_waste_kg: 7,
+    cleanup_time_minutes: 12, waste_types: ['Paper', 'Styrofoam'],
+    confidence: 0.81,
+    photo: 'https://images.unsplash.com/photo-1530587191325-3db32d826c18?w=400&q=80'
+  },
+  {
+    id: 4, lat: 33.833, lng: -117.911, severity: 'medium',
+    name: 'Euclid St Corridor', estimated_waste_kg: 5,
+    cleanup_time_minutes: 10, waste_types: ['Mixed Waste'],
+    confidence: 0.75,
+    photo: 'https://images.unsplash.com/photo-1567613387979-af56736a89c6?w=400&q=80'
+  },
+  {
+    id: 5, lat: 33.841, lng: -117.916, severity: 'low',
+    name: 'Brookhurst Community Park', estimated_waste_kg: 2,
+    cleanup_time_minutes: 5, waste_types: ['Organic', 'Paper'],
+    confidence: 0.71,
+    photo: 'https://images.unsplash.com/photo-1573408301185-9519f94816b5?w=400&q=80'
+  },
+];
 
-  const mockHotspots = [
-    { id: 1, lat: 33.837, lng: -117.915, severity: 'high', name: 'Trash Point 1', estimated_waste_kg: 12, cleanup_time_minutes: 15, waste_types: ['Plastic'], confidence: 0.9 },
-    { id: 2, lat: 33.835, lng: -117.913, severity: 'medium', name: 'Trash Point 2', estimated_waste_kg: 5, cleanup_time_minutes: 10, waste_types: ['Paper'], confidence: 0.8 },
-    { id: 3, lat: 33.836, lng: -117.912, severity: 'low', name: 'Trash Point 3', estimated_waste_kg: 3, cleanup_time_minutes: 5, waste_types: ['Glass'], confidence: 0.7 },
-  ];
+// ── Nearest-neighbor route builder ───────────────────────────────────────────
+// Haversine distance in km between two [lat,lng] points
+function haversine([lat1, lng1], [lat2, lng2]) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
-  const mockRoute = {
-    route_coordinates: mockHotspots.map(h => [h.lat, h.lng]),
-    total_distance_km: 2.5,
-    total_time_minutes: 30,
-    total_waste_kg: 20,
-    hotspots: mockHotspots,
+// Greedy nearest-neighbor TSP starting from the first hotspot in the list
+function buildNearestNeighborRoute(hotspots) {
+  if (!hotspots.length) return { ordered: [], route_coordinates: [], total_distance_km: 0 };
+
+  const unvisited = [...hotspots];
+
+  // Start from the hotspot closest to the centroid so the path flows naturally by geography
+  const centLat = unvisited.reduce((s, h) => s + h.lat, 0) / unvisited.length;
+  const centLng = unvisited.reduce((s, h) => s + h.lng, 0) / unvisited.length;
+  let startIdx = 0, startDist = Infinity;
+  unvisited.forEach((h, i) => {
+    const d = haversine([centLat, centLng], [h.lat, h.lng]);
+    if (d < startDist) { startDist = d; startIdx = i; }
+  });
+  const ordered = [unvisited.splice(startIdx, 1)[0]];
+
+  while (unvisited.length) {
+    const last = ordered[ordered.length - 1];
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    unvisited.forEach((h, i) => {
+      const d = haversine([last.lat, last.lng], [h.lat, h.lng]);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    });
+    ordered.push(unvisited.splice(bestIdx, 1)[0]);
+  }
+
+  // Sum up total distance along the ordered path
+  let totalDist = 0;
+  for (let i = 1; i < ordered.length; i++) {
+    totalDist += haversine(
+      [ordered[i - 1].lat, ordered[i - 1].lng],
+      [ordered[i].lat, ordered[i].lng]
+    );
+  }
+
+  return {
+    ordered,
+    route_coordinates: ordered.map(h => [h.lat, h.lng]),
+    total_distance_km: +totalDist.toFixed(2),
+    total_time_minutes: ordered.reduce((s, h) => s + h.cleanup_time_minutes, 0),
+    total_waste_kg: ordered.reduce((s, h) => s + h.estimated_waste_kg, 0),
   };
+}
 
-  const getSeverityColor = (severity) => {
-    switch(severity) {
-      case 'high': return '#e74c3c';
-      case 'medium': return '#f39c12';
-      case 'low': return '#27ae60';
-      default: return '#3498db';
-    }
-  };
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const SEV_COLOR = { high: '#ff3b3b', medium: '#ffaa00', low: '#22c55e' };
+const SEV_RADIUS = { high: 220, medium: 160, low: 100 };
+const getSeverityColor = (s) => SEV_COLOR[s] || '#3b82f6';
+
+// Recenter map when zip changes
+function MapRecenter({ center }) {
+  const map = useMap();
+  useEffect(() => { map.setView(center, 14, { animate: true }); }, [center]);
+  return null;
+}
+
+// ── Drone animation overlay (canvas) ─────────────────────────────────────────
+function DroneCanvas({ active }) {
+  const canvasRef = useRef(null);
+  const animRef = useRef(null);
+
+  useEffect(() => {
+    if (!active) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    let t = 0;
+
+    const draw = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // Drone path sweep lines
+      ctx.strokeStyle = 'rgba(0,230,255,0.18)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 8; i++) {
+        const y = ((t * 0.4 + i * 40) % canvas.height);
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+      // Drone dot
+      const dx = 60 + (Math.sin(t * 0.02) * 0.5 + 0.5) * (canvas.width - 120);
+      const dy = 60 + (Math.sin(t * 0.013 + 1) * 0.5 + 0.5) * (canvas.height - 120);
+      ctx.beginPath();
+      ctx.arc(dx, dy, 7, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,230,255,0.9)';
+      ctx.fill();
+      // Pulse ring
+      ctx.beginPath();
+      ctx.arc(dx, dy, 7 + (t % 40) * 0.6, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(0,230,255,${0.6 - (t % 40) * 0.015})`;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      t++;
+      animRef.current = requestAnimationFrame(draw);
+    };
+    animRef.current = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(animRef.current);
+  }, [active]);
+
+  if (!active) return null;
+  return (
+    <canvas
+      ref={canvasRef}
+      width={800} height={600}
+      style={{
+        position: 'absolute', inset: 0, width: '100%', height: '100%',
+        pointerEvents: 'none', zIndex: 500, opacity: 0.7,
+      }}
+    />
+  );
+}
+
+// ── TITLE PAGE ────────────────────────────────────────────────────────────────
+function TitlePage({ onEnter }) {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => { setTimeout(() => setVisible(true), 100); }, []);
 
   return (
-    <div className="app">
-      <header className="header">
-        <h1>🛸 CleanSky AI</h1>
-        <p>AI-Powered Urban Trash Detection & Route Optimization</p>
-      </header>
+    <div className={`title-page ${visible ? 'visible' : ''}`}>
+      {/* Background image overlay */}
+      <div className="title-bg" />
+      <div className="title-noise" />
 
-      <div className="container">
-        <div className="main-grid">
-          <div className="map-container">
-            <MapContainer center={mapCenter} zoom={14} style={{ height: '100%', width: '100%' }}>
-              <TileLayer
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                attribution='&copy; OpenStreetMap contributors'
-              />
-              {mockHotspots.map(h => (
-                <div key={h.id}>
-                  <CircleMarker
-                    center={[h.lat, h.lng]}
-                    radius={10}
-                    fillColor={getSeverityColor(h.severity)}
-                    color="#fff"
-                    weight={2}
-                    fillOpacity={0.8}
-                  >
-                    <Popup>
-                      <strong>{h.name}</strong><br />
-                      Severity: {h.severity.toUpperCase()}<br />
-                      Waste: {h.estimated_waste_kg} kg<br />
-                      Types: {h.waste_types.join(', ')}<br />
-                      Cleanup: {h.cleanup_time_minutes} min<br />
-                      Confidence: {(h.confidence * 100).toFixed(0)}%
-                    </Popup>
-                  </CircleMarker>
+      <div className="title-content">
+        <div className="title-eyebrow">AI-POWERED URBAN CLEANUP</div>
 
-                  <Circle
-                    center={[h.lat, h.lng]}
-                    radius={h.severity === 'high' ? 200 : h.severity === 'medium' ? 150 : 100}
-                    fillColor={getSeverityColor(h.severity)}
-                    color={getSeverityColor(h.severity)}
-                    weight={1}
-                    opacity={0.3}
-                    fillOpacity={0.2}
-                  />
-                </div>
-              ))}
+        <h1 className="title-logo">
+          <span className="title-sky">Sky</span>
+          <span className="title-sweep">Sweep</span>
+        </h1>
 
-              <Polyline positions={mockRoute.route_coordinates} color="#667eea" weight={3} opacity={0.7} dashArray="10,5" />
-            </MapContainer>
+        <p className="title-tagline">
+          Autonomous drone intelligence that finds, maps, and routes<br />
+          urban waste — before it becomes a crisis.
+        </p>
+
+        <div className="title-features">
+          <div className="title-feat"><span className="feat-icon">🛸</span>Drone Simulation</div>
+          <div className="title-feat"><span className="feat-icon">🗺️</span>Live Hotspot Mapping</div>
+          <div className="title-feat"><span className="feat-icon">📸</span>Real-Time Photo Intel</div>
+          <div className="title-feat"><span className="feat-icon">🧹</span>Optimized Cleanup Routes</div>
+        </div>
+
+        <button className="title-cta" onClick={onEnter}>
+          <span>Launch Mission</span>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
+          </svg>
+        </button>
+      </div>
+
+      {/* Floating drone graphic */}
+      <div className="drone-float">
+        <div className="drone-body">🛸</div>
+        <div className="drone-ring ring1" />
+        <div className="drone-ring ring2" />
+      </div>
+    </div>
+  );
+}
+
+// ── PHOTO MODAL ───────────────────────────────────────────────────────────────
+function PhotoModal({ hotspot, onClose }) {
+  if (!hotspot) return null;
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-card" onClick={e => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose}>✕</button>
+        <div className="modal-severity" style={{ background: getSeverityColor(hotspot.severity) }}>
+          {hotspot.severity.toUpperCase()} PRIORITY
+        </div>
+        <img src={hotspot.photo} alt="Trash site" className="modal-photo" />
+        <div className="modal-info">
+          <h3>{hotspot.name}</h3>
+          <div className="modal-stats">
+            <div className="modal-stat">
+              <span className="mstat-label">Waste Est.</span>
+              <span className="mstat-value">{hotspot.estimated_waste_kg} kg</span>
+            </div>
+            <div className="modal-stat">
+              <span className="mstat-label">Cleanup</span>
+              <span className="mstat-value">{hotspot.cleanup_time_minutes} min</span>
+            </div>
+            <div className="modal-stat">
+              <span className="mstat-label">Confidence</span>
+              <span className="mstat-value">{(hotspot.confidence * 100).toFixed(0)}%</span>
+            </div>
           </div>
-
-          <div className="stats-panel">
-            <h2>📊 Detection Statistics</h2>
-            <div className="stat-card">
-              <div className="stat-icon">📍</div>
-              <div>
-                <h3>Hotspots Detected</h3>
-                <div className="value">{mockHotspots.length}</div>
-              </div>
-            </div>
-
-            <div className="stat-card">
-              <div className="stat-icon">⚖️</div>
-              <div>
-                <h3>Estimated Waste</h3>
-                <div className="value">{mockHotspots.reduce((sum,h)=>sum+h.estimated_waste_kg,0)} kg</div>
-              </div>
-            </div>
-
-            <div className="stat-card">
-              <div className="stat-icon">⏱️</div>
-              <div>
-                <h3>Cleanup Time</h3>
-                <div className="value">{mockHotspots.reduce((sum,h)=>sum+h.cleanup_time_minutes,0)} min</div>
-              </div>
-            </div>
+          <div className="modal-types">
+            {hotspot.waste_types.map(t => (
+              <span key={t} className="waste-tag">{t}</span>
+            ))}
+          </div>
+          <div className={`crew-rec ${hotspot.severity === 'high' ? 'crew-needed' : ''}`}>
+            {hotspot.severity === 'high'
+              ? '⚠️ Crew deployment recommended for this site'
+              : '✅ Single operator sufficient'}
           </div>
         </div>
       </div>
@@ -111,4 +260,411 @@ function App() {
   );
 }
 
-export default App;
+// ── Build route from a starting [lat,lng] through active hotspots ─────────────
+function buildRouteFromStart(startLatLng, hotspots) {
+  if (!hotspots.length) return { ordered: [], route_coordinates: [], total_distance_km: 0, total_time_minutes: 0, total_waste_kg: 0 };
+  const unvisited = [...hotspots];
+  const ordered = [];
+  let current = startLatLng;
+  while (unvisited.length) {
+    let bestIdx = 0, bestDist = Infinity;
+    unvisited.forEach((h, i) => {
+      const d = haversine(current, [h.lat, h.lng]);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    });
+    const next = unvisited.splice(bestIdx, 1)[0];
+    ordered.push(next);
+    current = [next.lat, next.lng];
+  }
+  let totalDist = haversine(startLatLng, [ordered[0].lat, ordered[0].lng]);
+  for (let i = 1; i < ordered.length; i++)
+    totalDist += haversine([ordered[i-1].lat, ordered[i-1].lng], [ordered[i].lat, ordered[i].lng]);
+  return {
+    ordered,
+    route_coordinates: [startLatLng, ...ordered.map(h => [h.lat, h.lng])],
+    total_distance_km: +totalDist.toFixed(2),
+    total_time_minutes: ordered.reduce((s, h) => s + h.cleanup_time_minutes, 0),
+    total_waste_kg: ordered.reduce((s, h) => s + h.estimated_waste_kg, 0),
+  };
+}
+
+// ── Map click handler ─────────────────────────────────────────────────────────
+function MapClickHandler({ enabled, onMapClick }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!enabled) return;
+    const handler = (e) => onMapClick([e.latlng.lat, e.latlng.lng]);
+    map.on('click', handler);
+    return () => map.off('click', handler);
+  }, [enabled, onMapClick, map]);
+  return null;
+}
+
+// ── DASHBOARD PAGE ────────────────────────────────────────────────────────────
+function Dashboard() {
+  const [zip, setZip] = useState('');
+  const [scanning, setScanning] = useState(false);
+  const [scanDone, setScanDone] = useState(false);
+  const [allHotspots, setAllHotspots] = useState([]);   // all detected, never mutated
+  const [skipped, setSkipped] = useState(new Set());    // skipped hotspot ids
+  const [startPin, setStartPin] = useState(null);       // [lat, lng] user clicked
+  const [pickingStart, setPickingStart] = useState(false);
+  const [route, setRoute] = useState(null);
+  const [mapCenter] = useState([33.8366, -117.9143]);
+  const [selectedHotspot, setSelectedHotspot] = useState(null);
+  const [activeFilter, setActiveFilter] = useState('all');
+
+  // Active hotspots = all minus skipped
+  const activeHotspots = allHotspots.filter(h => !skipped.has(h.id));
+
+  // Recompute route whenever start pin or active hotspots change
+  useEffect(() => {
+    if (!startPin || !activeHotspots.length) { setRoute(null); return; }
+    setRoute(buildRouteFromStart(startPin, activeHotspots));
+  }, [startPin, skipped, allHotspots]);
+
+  const runScan = () => {
+    if (!zip || zip.length < 5) return;
+    setScanning(true);
+    setScanDone(false);
+    setAllHotspots([]);
+    setSkipped(new Set());
+    setStartPin(null);
+    setRoute(null);
+    setTimeout(() => {
+      setAllHotspots(MOCK_HOTSPOTS);
+      setScanning(false);
+      setScanDone(true);
+    }, 2800);
+  };
+
+  const toggleSkip = (id, e) => {
+    e.stopPropagation();
+    setSkipped(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const handleMapClick = (latlng) => {
+    setStartPin(latlng);
+    setPickingStart(false);
+  };
+
+  const filtered = activeFilter === 'all'
+    ? allHotspots
+    : allHotspots.filter(h => h.severity === activeFilter);
+
+  const routeStops = route ? route.ordered : [];
+
+  return (
+    <div className="dashboard">
+      {/* Top bar */}
+      <header className="dash-header">
+        <div className="dash-logo">
+          <span className="dash-sky">Sky</span><span className="dash-sweep">Sweep</span>
+        </div>
+        <div className="dash-subtitle">Urban Trash Intelligence Platform</div>
+      </header>
+
+      {/* Zip input bar */}
+      <div className="zip-bar">
+        <div className="zip-inner">
+          <div className="zip-label">📍 Enter ZIP Code to Scan</div>
+          <div className="zip-row">
+            <input
+              className="zip-input"
+              type="text"
+              placeholder="e.g. 92801"
+              maxLength={5}
+              value={zip}
+              onChange={e => setZip(e.target.value.replace(/\D/, ''))}
+              onKeyDown={e => e.key === 'Enter' && runScan()}
+            />
+            <button
+              className={`zip-btn ${scanning ? 'scanning' : ''}`}
+              onClick={runScan}
+              disabled={scanning || zip.length < 5}
+            >
+              {scanning ? <><span className="spin">🛸</span> Scanning...</> : '🚀 Run Scan'}
+            </button>
+          </div>
+          {scanning && (
+            <div className="scan-progress">
+              <div className="scan-bar"><div className="scan-fill" /></div>
+              <span>Deploying drone over ZIP {zip}…</span>
+            </div>
+          )}
+          {/* Start location picker prompt */}
+          {scanDone && (
+            <div className="start-picker-bar">
+              {!startPin ? (
+                <>
+                  <span className="start-hint">
+                    {pickingStart
+                      ? '🖱️ Click anywhere on the map to set your starting location…'
+                      : '📌 Set your starting location to generate a cleanup route'}
+                  </span>
+                  <button
+                    className={`pick-btn ${pickingStart ? 'picking' : ''}`}
+                    onClick={() => setPickingStart(p => !p)}
+                  >
+                    {pickingStart ? '✕ Cancel' : '📍 Pick Start'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="start-hint start-set">
+                    ✅ Start set · Route covers {activeHotspots.length} stop{activeHotspots.length !== 1 ? 's' : ''}
+                    {skipped.size > 0 && <span className="skipped-badge">{skipped.size} skipped</span>}
+                  </span>
+                  <button className="pick-btn" onClick={() => { setStartPin(null); setRoute(null); }}>
+                    🔄 Reset
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Main layout */}
+      <div className="dash-grid">
+        {/* Map */}
+        <div className={`map-wrap ${pickingStart ? 'cursor-crosshair' : ''}`}>
+          <MapContainer center={mapCenter} zoom={14} style={{ height: '100%', width: '100%' }}>
+            <MapRecenter center={mapCenter} />
+            <TileLayer
+              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+              attribution='&copy; CartoDB'
+            />
+            <MapClickHandler enabled={pickingStart} onMapClick={handleMapClick} />
+
+            {/* Hotspot markers */}
+            {filtered.map(h => {
+              const isSkipped = skipped.has(h.id);
+              const routeIdx = routeStops.findIndex(r => r.id === h.id);
+              return (
+                <React.Fragment key={h.id}>
+                  <CircleMarker
+                    center={[h.lat, h.lng]}
+                    radius={12}
+                    fillColor={isSkipped ? '#444' : getSeverityColor(h.severity)}
+                    color={isSkipped ? '#666' : '#fff'}
+                    weight={2}
+                    fillOpacity={isSkipped ? 0.35 : 0.9}
+                    eventHandlers={{ click: () => !isSkipped && setSelectedHotspot(h) }}
+                  >
+                    <Popup>
+                      <div style={{ fontFamily: 'monospace', fontSize: 13 }}>
+                        <strong>{h.name}</strong><br />
+                        <span style={{ color: getSeverityColor(h.severity) }}>● {h.severity.toUpperCase()}</span><br />
+                        {h.estimated_waste_kg} kg · {h.cleanup_time_minutes} min<br />
+                        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                          <button onClick={() => setSelectedHotspot(h)}
+                            style={{ padding: '4px 10px', background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
+                            📸 Photo
+                          </button>
+                          <button onClick={(e) => toggleSkip(h.id, e)}
+                            style={{ padding: '4px 10px', background: isSkipped ? '#22c55e' : '#ff3b3b', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
+                            {isSkipped ? '+ Restore' : '✕ Skip'}
+                          </button>
+                        </div>
+                      </div>
+                    </Popup>
+                  </CircleMarker>
+                  {!isSkipped && (
+                    <Circle
+                      center={[h.lat, h.lng]}
+                      radius={SEV_RADIUS[h.severity]}
+                      fillColor={getSeverityColor(h.severity)}
+                      color={getSeverityColor(h.severity)}
+                      weight={1} opacity={0.4} fillOpacity={0.12}
+                    />
+                  )}
+                </React.Fragment>
+              );
+            })}
+
+            {/* Route polyline */}
+            {route && (
+              <Polyline
+                positions={route.route_coordinates}
+                color="#00e5ff" weight={3} opacity={0.85} dashArray="8,5"
+              />
+            )}
+
+            {/* Start pin marker */}
+            {startPin && (
+              <CircleMarker
+                center={startPin}
+                radius={14}
+                fillColor="#ffffff"
+                color="#00e5ff"
+                weight={3}
+                fillOpacity={1}
+              >
+                <Popup>
+                  <div style={{ fontFamily: 'monospace', fontSize: 13, textAlign: 'center' }}>
+                    <strong>📍 Your Start</strong><br />
+                    {activeHotspots.length} stops from here
+                  </div>
+                </Popup>
+              </CircleMarker>
+            )}
+
+            <DroneCanvas active={scanning} />
+          </MapContainer>
+
+          {/* Crosshair overlay when picking */}
+          {pickingStart && (
+            <div className="crosshair-overlay">
+              <div className="crosshair-msg">Click to drop your start pin</div>
+            </div>
+          )}
+
+          {!scanDone && !scanning && (
+            <div className="map-idle">
+              <div className="map-idle-icon">🛸</div>
+              <div>Enter a ZIP code above to deploy drone scan</div>
+            </div>
+          )}
+        </div>
+
+        {/* Sidebar */}
+        <div className="sidebar">
+          {/* Stats */}
+          {scanDone && (
+            <div className="stats-row">
+              <div className="stat-box">
+                <div className="stat-num">{activeHotspots.length}</div>
+                <div className="stat-lbl">Active Stops</div>
+              </div>
+              <div className="stat-box">
+                <div className="stat-num">{activeHotspots.reduce((s,h)=>s+h.estimated_waste_kg,0)}<small>kg</small></div>
+                <div className="stat-lbl">Est. Waste</div>
+              </div>
+              <div className="stat-box">
+                <div className="stat-num">{activeHotspots.reduce((s,h)=>s+h.cleanup_time_minutes,0)}<small>m</small></div>
+                <div className="stat-lbl">Cleanup Time</div>
+              </div>
+              {route && (
+                <div className="stat-box">
+                  <div className="stat-num">{route.total_distance_km}<small>km</small></div>
+                  <div className="stat-lbl">Route Dist.</div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Filter tabs */}
+          {scanDone && (
+            <div className="filter-tabs">
+              {['all', 'high', 'medium', 'low'].map(f => (
+                <button key={f} className={`ftab ${activeFilter === f ? 'active' : ''} ftab-${f}`}
+                  onClick={() => setActiveFilter(f)}>
+                  {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Hotspot list */}
+          {filtered.length > 0 && (
+            <div className="hotspot-list-scroll">
+              <div className="list-title">📍 Detected Hotspots</div>
+              {filtered.map((h, i) => {
+                const isSkipped = skipped.has(h.id);
+                return (
+                  <div key={h.id}
+                    className={`hspot-card sev-${h.severity} ${isSkipped ? 'hspot-skipped' : ''}`}
+                    onClick={() => !isSkipped && setSelectedHotspot(h)}
+                  >
+                    <div className="hspot-top">
+                      <div className="hspot-rank">#{i + 1}</div>
+                      <div className="hspot-name">{h.name}</div>
+                      <div className="hspot-badge" style={{ background: isSkipped ? '#444' : getSeverityColor(h.severity) }}>
+                        {isSkipped ? 'SKIPPED' : h.severity.toUpperCase()}
+                      </div>
+                    </div>
+                    <div className="hspot-meta">
+                      <span>⚖️ {h.estimated_waste_kg} kg</span>
+                      <span>⏱ {h.cleanup_time_minutes} min</span>
+                      <span>🎯 {(h.confidence * 100).toFixed(0)}%</span>
+                    </div>
+                    <div className="hspot-types">
+                      {h.waste_types.map(t => <span key={t} className="wtype">{t}</span>)}
+                    </div>
+                    <div className="hspot-actions">
+                      {!isSkipped && <div className="hspot-photo-hint">📸 Click to view site photo</div>}
+                      <button
+                        className={`skip-btn ${isSkipped ? 'restore-btn' : ''}`}
+                        onClick={(e) => toggleSkip(h.id, e)}
+                      >
+                        {isSkipped ? '↩ Restore' : '✕ Skip Stop'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Route steps — only shown when start pin is set */}
+          {route && scanDone && routeStops.length > 0 && (
+            <div className="route-panel">
+              <div className="list-title">🗺️ Your Cleanup Route</div>
+              <div className="route-start-label">📍 Your Start →</div>
+              {routeStops.map((h, i) => (
+                <div key={h.id} className="route-step-card">
+                  <div className="rstep-num" style={{ background: getSeverityColor(h.severity) }}>{i + 1}</div>
+                  <div style={{ flex: 1 }}>
+                    <div className="rstep-name">{h.name}</div>
+                    <div className="rstep-meta">{h.estimated_waste_kg} kg · {h.cleanup_time_minutes} min</div>
+                  </div>
+                  <button className="rstep-skip" onClick={(e) => toggleSkip(h.id, e)} title="Skip this stop">✕</button>
+                </div>
+              ))}
+              <div className="route-summary-pill">
+                {route.total_distance_km} km · {route.total_time_minutes} min · {route.total_waste_kg} kg total
+              </div>
+            </div>
+          )}
+
+          {/* No start pin yet but scan done */}
+          {scanDone && !startPin && (
+            <div className="sidebar-empty" style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 32 }}>📍</div>
+              <div>Click <strong>"Pick Start"</strong> above then tap the map to set where you're cleaning from</div>
+            </div>
+          )}
+
+          {!scanDone && !scanning && (
+            <div className="sidebar-empty">
+              <div style={{ fontSize: 40 }}>🛸</div>
+              <div>Scan results will appear here</div>
+            </div>
+          )}
+          {scanning && (
+            <div className="sidebar-empty">
+              <div className="big-spin">🛸</div>
+              <div>Drone scanning ZIP {zip}…</div>
+              <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>Detecting trash hotspots via YOLO</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <PhotoModal hotspot={selectedHotspot} onClose={() => setSelectedHotspot(null)} />
+    </div>
+  );
+}
+
+// ── ROOT ──────────────────────────────────────────────────────────────────────
+export default function App() {
+  const [page, setPage] = useState('title');
+  return page === 'title'
+    ? <TitlePage onEnter={() => setPage('dashboard')} />
+    : <Dashboard />;
+}
