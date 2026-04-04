@@ -4,12 +4,16 @@ import unittest
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from backend.data_store import reset_data_store_for_tests
 from backend.main import app
 
 class CleanSkyApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.client = TestClient(app)
+
+    def setUp(self):
+        reset_data_store_for_tests()
 
     def test_health(self):
         response = self.client.get("/api/health")
@@ -95,6 +99,78 @@ class CleanSkyApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         payload = response.json()
         self.assertEqual(payload["error"]["code"], "INVALID_CONTENT_TYPE")
+
+    def test_round_rollover_clears_positions_and_keeps_trash_history(self):
+        first_round = self.client.post("/api/rounds/start", json={"drone_round_id": "round_a"})
+        self.assertEqual(first_round.status_code, 200)
+        self.client.post(
+            "/api/drone-position",
+            json={
+                "round_id": "round_a",
+                "drone_id": "drone_1",
+                "lat": 33.84,
+                "lng": -117.95,
+            },
+        )
+        self.client.post(
+            "/api/trash-entry",
+            json={
+                "round_id": "round_a",
+                "drone_id": "drone_1",
+                "lat": 33.8446,
+                "lng": -117.9539,
+                "size": 5,
+            },
+        )
+
+        second_round = self.client.post("/api/rounds/start", json={"drone_round_id": "round_b"})
+        self.assertEqual(second_round.status_code, 200)
+
+        hotspots = self.client.get("/api/hotspots", params={"zip": "92801", "radius_km": 2.0})
+        self.assertEqual(hotspots.status_code, 200)
+        payload = hotspots.json()
+        self.assertGreaterEqual(len(payload), 1)
+
+    def test_trash_entry_size_validation(self):
+        self.client.post("/api/rounds/start", json={"drone_round_id": "round_size"})
+        response = self.client.post(
+            "/api/trash-entry",
+            json={
+                "round_id": "round_size",
+                "drone_id": "drone_1",
+                "lat": 33.84,
+                "lng": -117.95,
+                "size": 11,
+            },
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_hotspots_unknown_zip(self):
+        response = self.client.get("/api/hotspots", params={"zip": "00000", "radius_km": 2.0})
+        self.assertEqual(response.status_code, 404)
+        payload = response.json()
+        self.assertEqual(payload["error"]["code"], "ZIP_NOT_FOUND")
+
+    def test_hotspots_color_scoring(self):
+        self.client.post("/api/rounds/start", json={"drone_round_id": "round_score"})
+        for size in [1, 2, 10, 10, 10]:
+            self.client.post(
+                "/api/trash-entry",
+                json={
+                    "round_id": "round_score",
+                    "drone_id": "drone_1",
+                    "lat": 33.8446,
+                    "lng": -117.9539,
+                    "size": size,
+                },
+            )
+
+        response = self.client.get("/api/hotspots", params={"zip": "92801", "radius_km": 2.0})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertGreaterEqual(len(payload), 1)
+        self.assertIn(payload[0]["color"], ["green", "yellow", "red"])
+        self.assertGreater(payload[0]["score"], 0)
 
 
 if __name__ == "__main__":
