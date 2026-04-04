@@ -104,6 +104,11 @@ function buildNearestNeighborRoute(hotspots) {
 const SEV_COLOR = { high: '#ff3b3b', medium: '#ffaa00', low: '#22c55e' };
 const SEV_RADIUS = { high: 220, medium: 160, low: 100 };
 const getSeverityColor = (s) => SEV_COLOR[s] || '#3b82f6';
+const colorToSeverity = (color) => {
+  if (color === 'red') return 'high';
+  if (color === 'yellow') return 'medium';
+  return 'low';
+};
 
 // Recenter map when zip changes
 function MapRecenter({ center }) {
@@ -311,7 +316,7 @@ function Dashboard() {
   const [startPin, setStartPin] = useState(null);       // [lat, lng] user clicked
   const [pickingStart, setPickingStart] = useState(false);
   const [route, setRoute] = useState(null);
-  const [mapCenter] = useState([33.8366, -117.9143]);
+  const [mapCenter, setMapCenter] = useState([33.8366, -117.9143]);
   const [selectedHotspot, setSelectedHotspot] = useState(null);
   const [activeFilter, setActiveFilter] = useState('all');
   const [scanError, setScanError] = useState('');
@@ -337,20 +342,33 @@ function Dashboard() {
     setRoute(null);
     setPrefetchedRoute(null);
     try {
-      const scanResponse = await axios.post('/api/scan', {
-        center_lat: mapCenter[0],
-        center_lng: mapCenter[1],
-        radius_km: 2.0,
+      const hotspotsResponse = await axios.get('/api/hotspots', {
+        params: { zip, radius_km: 2.0 },
       });
-      const scanned = (scanResponse.data || []).map((hotspot, idx) => ({
-        ...hotspot,
+      const scanned = (hotspotsResponse.data || []).map((hotspot, idx) => ({
+        id: hotspot.hotspot_id,
+        lat: hotspot.lat,
+        lng: hotspot.lng,
+        severity: colorToSeverity(hotspot.color),
+        name: `ZIP ${zip} Hotspot #${idx + 1}`,
+        estimated_waste_kg: Number((hotspot.total_size * 0.2).toFixed(1)),
+        cleanup_time_minutes: Math.max(5, hotspot.pile_count * 4),
+        waste_types: [
+          `${hotspot.pile_count} pile${hotspot.pile_count === 1 ? '' : 's'}`,
+          `Avg size ${hotspot.avg_size}/10`,
+          `Score ${hotspot.score}`,
+        ],
+        confidence: 0.9,
+        detected_at: hotspot.last_detected_at,
         photo: MOCK_HOTSPOTS[idx % MOCK_HOTSPOTS.length].photo,
       }));
       setAllHotspots(scanned);
 
       if (scanned.length > 0) {
-        const routeResponse = await axios.post('/api/optimize-route', scanned);
-        setPrefetchedRoute(routeResponse.data || null);
+        const centerLat = scanned.reduce((sum, h) => sum + h.lat, 0) / scanned.length;
+        const centerLng = scanned.reduce((sum, h) => sum + h.lng, 0) / scanned.length;
+        setMapCenter([centerLat, centerLng]);
+        setPrefetchedRoute(buildNearestNeighborRoute(scanned));
       }
 
       setScanning(false);
@@ -360,7 +378,8 @@ function Dashboard() {
       setScanDone(false);
       setAllHotspots([]);
       setPrefetchedRoute(null);
-      setScanError('Unable to reach backend API. Confirm FastAPI is running on port 8000.');
+      const apiMessage = error?.response?.data?.error?.message;
+      setScanError(apiMessage || 'Unable to fetch hotspots. Confirm backend is running and ZIP is seeded.');
     }
   };
 
@@ -383,7 +402,7 @@ function Dashboard() {
     : allHotspots.filter(h => h.severity === activeFilter);
 
   const displayRoute = route || prefetchedRoute;
-  const routeStops = route ? route.ordered : (prefetchedRoute?.hotspots || []);
+  const routeStops = route ? route.ordered : (prefetchedRoute?.ordered || prefetchedRoute?.hotspots || []);
 
   return (
     <div className="dashboard">
