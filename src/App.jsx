@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import axios from 'axios';
 import { MapContainer, TileLayer, CircleMarker, Circle, Polyline, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -313,6 +314,8 @@ function Dashboard() {
   const [mapCenter] = useState([33.8366, -117.9143]);
   const [selectedHotspot, setSelectedHotspot] = useState(null);
   const [activeFilter, setActiveFilter] = useState('all');
+  const [scanError, setScanError] = useState('');
+  const [prefetchedRoute, setPrefetchedRoute] = useState(null);
 
   // Active hotspots = all minus skipped
   const activeHotspots = allHotspots.filter(h => !skipped.has(h.id));
@@ -323,19 +326,42 @@ function Dashboard() {
     setRoute(buildRouteFromStart(startPin, activeHotspots));
   }, [startPin, skipped, allHotspots]);
 
-  const runScan = () => {
+  const runScan = async () => {
     if (!zip || zip.length < 5) return;
     setScanning(true);
+    setScanError('');
     setScanDone(false);
     setAllHotspots([]);
     setSkipped(new Set());
     setStartPin(null);
     setRoute(null);
-    setTimeout(() => {
-      setAllHotspots(MOCK_HOTSPOTS);
+    setPrefetchedRoute(null);
+    try {
+      const scanResponse = await axios.post('/api/scan', {
+        center_lat: mapCenter[0],
+        center_lng: mapCenter[1],
+        radius_km: 2.0,
+      });
+      const scanned = (scanResponse.data || []).map((hotspot, idx) => ({
+        ...hotspot,
+        photo: MOCK_HOTSPOTS[idx % MOCK_HOTSPOTS.length].photo,
+      }));
+      setAllHotspots(scanned);
+
+      if (scanned.length > 0) {
+        const routeResponse = await axios.post('/api/optimize-route', scanned);
+        setPrefetchedRoute(routeResponse.data || null);
+      }
+
       setScanning(false);
       setScanDone(true);
-    }, 2800);
+    } catch (error) {
+      setScanning(false);
+      setScanDone(false);
+      setAllHotspots([]);
+      setPrefetchedRoute(null);
+      setScanError('Unable to reach backend API. Confirm FastAPI is running on port 8000.');
+    }
   };
 
   const toggleSkip = (id, e) => {
@@ -356,7 +382,8 @@ function Dashboard() {
     ? allHotspots
     : allHotspots.filter(h => h.severity === activeFilter);
 
-  const routeStops = route ? route.ordered : [];
+  const displayRoute = route || prefetchedRoute;
+  const routeStops = route ? route.ordered : (prefetchedRoute?.hotspots || []);
 
   return (
     <div className="dashboard">
@@ -390,6 +417,11 @@ function Dashboard() {
               {scanning ? <><span className="spin">🛸</span> Scanning...</> : '🚀 Run Scan'}
             </button>
           </div>
+          {scanError && (
+            <div style={{ marginTop: 10, color: '#ff6b6b', fontSize: 13 }}>
+              {scanError}
+            </div>
+          )}
           {scanning && (
             <div className="scan-progress">
               <div className="scan-bar"><div className="scan-fill" /></div>
@@ -397,7 +429,7 @@ function Dashboard() {
             </div>
           )}
           {/* Start location picker prompt */}
-          {scanDone && (
+          {scanDone && allHotspots.length > 0 && (
             <div className="start-picker-bar">
               {!startPin ? (
                 <>
@@ -488,9 +520,9 @@ function Dashboard() {
             })}
 
             {/* Route polyline */}
-            {route && (
+            {displayRoute && (
               <Polyline
-                positions={route.route_coordinates}
+                positions={displayRoute.route_coordinates}
                 color="#00e5ff" weight={3} opacity={0.85} dashArray="8,5"
               />
             )}
@@ -530,6 +562,12 @@ function Dashboard() {
               <div>Enter a ZIP code above to deploy drone scan</div>
             </div>
           )}
+          {scanDone && !scanning && allHotspots.length === 0 && (
+            <div className="map-idle">
+              <div className="map-idle-icon">✅</div>
+              <div>No hotspots detected for this scan.</div>
+            </div>
+          )}
         </div>
 
         {/* Sidebar */}
@@ -549,9 +587,9 @@ function Dashboard() {
                 <div className="stat-num">{activeHotspots.reduce((s,h)=>s+h.cleanup_time_minutes,0)}<small>m</small></div>
                 <div className="stat-lbl">Cleanup Time</div>
               </div>
-              {route && (
+              {displayRoute && (
                 <div className="stat-box">
-                  <div className="stat-num">{route.total_distance_km}<small>km</small></div>
+                  <div className="stat-num">{displayRoute.total_distance_km}<small>km</small></div>
                   <div className="stat-lbl">Route Dist.</div>
                 </div>
               )}
@@ -612,10 +650,10 @@ function Dashboard() {
           )}
 
           {/* Route steps — only shown when start pin is set */}
-          {route && scanDone && routeStops.length > 0 && (
+          {displayRoute && scanDone && routeStops.length > 0 && (
             <div className="route-panel">
               <div className="list-title">🗺️ Your Cleanup Route</div>
-              <div className="route-start-label">📍 Your Start →</div>
+              <div className="route-start-label">{startPin ? '📍 Your Start →' : '🧭 Suggested Route'}</div>
               {routeStops.map((h, i) => (
                 <div key={h.id} className="route-step-card">
                   <div className="rstep-num" style={{ background: getSeverityColor(h.severity) }}>{i + 1}</div>
@@ -627,7 +665,7 @@ function Dashboard() {
                 </div>
               ))}
               <div className="route-summary-pill">
-                {route.total_distance_km} km · {route.total_time_minutes} min · {route.total_waste_kg} kg total
+                {displayRoute.total_distance_km} km · {displayRoute.total_time_minutes} min · {displayRoute.total_waste_kg} kg total
               </div>
             </div>
           )}
@@ -651,6 +689,12 @@ function Dashboard() {
               <div className="big-spin">🛸</div>
               <div>Drone scanning ZIP {zip}…</div>
               <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>Detecting trash hotspots via YOLO</div>
+            </div>
+          )}
+          {scanDone && !scanning && allHotspots.length === 0 && (
+            <div className="sidebar-empty">
+              <div style={{ fontSize: 40 }}>✅</div>
+              <div>No hotspots found in this scan.</div>
             </div>
           )}
         </div>

@@ -2,6 +2,7 @@
 
 # CleanSky AI Setup Script
 # Run this to set up the entire project
+set -e
 
 echo "🛸 CleanSky AI Setup Script"
 echo "============================="
@@ -22,47 +23,38 @@ fi
 echo "✅ Prerequisites found"
 echo ""
 
-# Backend setup
-echo "📦 Setting up backend..."
-cd backend
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR"
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
+# Python environment setup
+echo "📦 Setting up Python environment..."
+python3 -m venv .venv
+source .venv/bin/activate
 
-# Install dependencies
+# Install backend dependencies
 pip install -r requirements.txt
 
-echo "✅ Backend setup complete"
+echo "✅ Python environment setup complete"
 echo ""
-
-# Return to root
-cd ..
 
 # Frontend setup
 echo "📦 Setting up frontend..."
-cd frontend
-
-# Install dependencies
 npm install
 
 echo "✅ Frontend setup complete"
 echo ""
-
-# Return to root
-cd ..
 
 echo "🎉 Setup complete!"
 echo ""
 echo "To run the application:"
 echo ""
 echo "Terminal 1 (Backend):"
-echo "  cd backend"
-echo "  source venv/bin/activate"
-echo "  uvicorn main:app --reload"
+echo "  cd $ROOT_DIR"
+echo "  source .venv/bin/activate"
+echo "  uvicorn backend.main:app --reload"
 echo ""
 echo "Terminal 2 (Frontend):"
-echo "  cd frontend"
+echo "  cd $ROOT_DIR"
 echo "  npm run dev"
 echo ""
 echo "Then open http://localhost:3000 in your browser"
