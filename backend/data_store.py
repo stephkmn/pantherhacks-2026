@@ -220,6 +220,18 @@ class InMemoryDataStore:
                     "score": score,
                     "color": score_to_color(score),
                     "last_detected_at": latest_at.isoformat(),
+                    "photo_url": next(
+                        (
+                            str(entry.meta.get("photo_url"))
+                            for entry in sorted(
+                                cluster_entries,
+                                key=lambda e: e.detected_at,
+                                reverse=True,
+                            )
+                            if entry.meta.get("photo_url")
+                        ),
+                        None,
+                    ),
                 }
             )
         results.sort(key=lambda item: item["score"], reverse=True)
