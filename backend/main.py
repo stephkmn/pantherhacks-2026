@@ -1,10 +1,15 @@
-from fastapi import FastAPI, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional
-import random
-import numpy as np
 from datetime import datetime
+from enum import Enum
+import random
+from typing import Any
+
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
+
+from backend.yolo_integration import detect_trash_yolo_from_bytes
 
 app = FastAPI(title="CleanSky AI API")
 
@@ -17,33 +22,87 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+class Severity(str, Enum):
+    high = "high"
+    medium = "medium"
+    low = "low"
+
+
 # Models
 class TrashHotspot(BaseModel):
     id: str
     name: str
-    lat: float
-    lng: float
-    severity: str  # "high", "medium", "low"
-    waste_types: List[str]
-    estimated_waste_kg: float
-    cleanup_time_minutes: int
-    confidence: float
-    detected_at: str
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    severity: Severity
+    waste_types: list[str]
+    estimated_waste_kg: float = Field(ge=0)
+    cleanup_time_minutes: int = Field(ge=0)
+    confidence: float = Field(ge=0, le=1)
+    detected_at: datetime
 
 class ScanRequest(BaseModel):
-    center_lat: float
-    center_lng: float
-    radius_km: float = 2.0
+    center_lat: float = Field(ge=-90, le=90)
+    center_lng: float = Field(ge=-180, le=180)
+    radius_km: float = Field(default=2.0, gt=0, le=10)
 
 class RouteResponse(BaseModel):
-    hotspots: List[TrashHotspot]
+    hotspots: list[TrashHotspot]
     total_distance_km: float
     total_time_minutes: int
     total_waste_kg: float
-    route_coordinates: List[List[float]]
+    route_coordinates: list[list[float]]
+
+
+class Detection(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    class_name: str = Field(alias="class")
+    confidence: float = Field(ge=0, le=1)
+    bbox: list[float] = Field(min_length=4, max_length=4)
+
+
+class DetectImageResponse(BaseModel):
+    status: str
+    message: str
+    filename: str
+    model_loaded: bool
+    fallback_reason: str | None = None
+    detections: list[Detection]
+    total_objects: int = Field(ge=0)
+    average_confidence: float = Field(ge=0, le=1)
+    image_size: list[int] = Field(min_length=2, max_length=2)
+    estimated_waste_kg: float = Field(ge=0)
+
+
+class ErrorEnvelope(BaseModel):
+    error: dict[str, Any]
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(_, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": {
+                "code": "VALIDATION_ERROR",
+                "message": "Request validation failed.",
+                "details": exc.errors(),
+            }
+        },
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(_, exc: HTTPException):
+    detail = exc.detail
+    if isinstance(detail, dict) and "code" in detail and "message" in detail:
+        error = detail
+    else:
+        error = {"code": "HTTP_ERROR", "message": str(detail)}
+    return JSONResponse(status_code=exc.status_code, content={"error": error})
 
 # Simulated trash detection (replace with real YOLO/Roboflow later)
-@app.post("/api/scan", response_model=List[TrashHotspot])
+@app.post("/api/scan", response_model=list[TrashHotspot])
 async def scan_area(scan_request: ScanRequest):
     """
     Simulates drone scanning an area and detecting trash hotspots
@@ -82,7 +141,7 @@ async def scan_area(scan_request: ScanRequest):
         
         # Random severity based on weights
         severity = random.choices(
-            ["high", "medium", "low"],
+            [Severity.high, Severity.medium, Severity.low],
             weights=[0.3, 0.5, 0.2]
         )[0]
         
@@ -107,7 +166,7 @@ async def scan_area(scan_request: ScanRequest):
             estimated_waste_kg=waste_kg,
             cleanup_time_minutes=cleanup_time,
             confidence=round(random.uniform(0.85, 0.98), 2),
-            detected_at=datetime.now().isoformat()
+            detected_at=datetime.now()
         )
         hotspots.append(hotspot)
     
@@ -115,7 +174,7 @@ async def scan_area(scan_request: ScanRequest):
 
 
 @app.post("/api/optimize-route", response_model=RouteResponse)
-async def optimize_cleanup_route(hotspots: List[TrashHotspot]):
+async def optimize_cleanup_route(hotspots: list[TrashHotspot]):
     """
     Generates optimal cleanup route using greedy nearest neighbor algorithm
     Can be upgraded to use OR-Tools or genetic algorithms
@@ -131,7 +190,11 @@ async def optimize_cleanup_route(hotspots: List[TrashHotspot]):
         )
     
     # Sort by severity first (prioritize high severity)
-    severity_weight = {"high": 3, "medium": 2, "low": 1}
+    severity_weight = {
+        Severity.high: 3,
+        Severity.medium: 2,
+        Severity.low: 1,
+    }
     sorted_hotspots = sorted(
         hotspots, 
         key=lambda x: severity_weight[x.severity], 
@@ -175,7 +238,16 @@ async def optimize_cleanup_route(hotspots: List[TrashHotspot]):
     )
 
 
-@app.post("/api/detect-image")
+@app.post(
+    "/api/detect-image",
+    response_model=DetectImageResponse,
+    responses={
+        400: {
+            "model": ErrorEnvelope,
+            "description": "Invalid input file type or missing payload.",
+        }
+    },
+)
 async def detect_trash_in_image(file: UploadFile = File(...)):
     """
     Endpoint for actual image-based trash detection
@@ -187,15 +259,32 @@ async def detect_trash_in_image(file: UploadFile = File(...)):
     - Return bounding boxes and classifications
     """
     
-    # Placeholder for now - will integrate real CV model
-    return {
-        "message": "Image received - integrate YOLO/Roboflow here",
-        "filename": file.filename,
-        "detections": [
-            {"class": "plastic_bottle", "confidence": 0.92, "bbox": [100, 200, 150, 300]},
-            {"class": "food_wrapper", "confidence": 0.88, "bbox": [300, 150, 380, 250]}
-        ]
-    }
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INVALID_CONTENT_TYPE",
+                "message": "Only image uploads are supported.",
+            },
+        )
+
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "EMPTY_FILE",
+                "message": "Uploaded file is empty.",
+            },
+        )
+
+    yolo_result = detect_trash_yolo_from_bytes(contents, file.filename or "uploaded-image")
+    mapped_detections = [
+        {"class": det["class"], "confidence": det["confidence"], "bbox": det["bbox"]}
+        for det in yolo_result["detections"]
+    ]
+    yolo_result["detections"] = mapped_detections
+    return yolo_result
 
 
 def calculate_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
