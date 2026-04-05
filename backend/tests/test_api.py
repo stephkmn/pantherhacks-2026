@@ -195,6 +195,8 @@ class CleanSkyApiTests(unittest.TestCase):
         self.assertLessEqual(len(payload), 3)
         self.assertIn("site_id", payload[0])
         self.assertIn("name", payload[0])
+        self.assertIn("maps_url", payload[0])
+        self.assertIn("address", payload[0])
         self.assertIn("distance_km", payload[0])
 
     def test_nearby_disposal_sites_invalid_lat(self):

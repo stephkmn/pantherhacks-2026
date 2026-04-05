@@ -171,6 +171,8 @@ class DisposalSiteResponse(BaseModel):
     site_type: str
     accepted_types: list[str]
     hours: str
+    address: str
+    maps_url: str
     distance_km: float
 
 
@@ -405,6 +407,11 @@ async def get_nearby_disposal_sites(lat: float, lng: float, limit: int = 3):
             site_type=str(site["site_type"]),
             accepted_types=[str(item) for item in (site.get("accepted_types") or [])],
             hours=str(site.get("hours") or "Hours unavailable"),
+            address=str(site.get("address") or "Address unavailable"),
+            maps_url=str(
+                site.get("maps_url")
+                or f"https://www.google.com/maps/search/?api=1&query={float(site['lat'])},{float(site['lng'])}"
+            ),
             distance_km=round(float(site.get("distance_km", 0.0)), 2),
         )
         for site in sites
