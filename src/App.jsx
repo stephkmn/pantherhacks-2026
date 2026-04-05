@@ -275,8 +275,8 @@ function PhotoModal({ hotspot, onClose, disposalSites, disposalLoading, disposal
           </div>
           <div className={`crew-rec ${hotspot.severity === 'high' ? 'crew-needed' : ''}`}>
             {hotspot.severity === 'high'
-              ? '⚠️ Crew deployment recommended for this site'
-              : '✅ Single operator sufficient'}
+              ? 'Crew deployment recommended for this site'
+              : 'Single operator sufficient'}
           </div>
           <div className="modal-disposal">
             <div className="modal-disposal-title">Nearby Disposal Sites</div>
@@ -343,19 +343,25 @@ function buildRouteFromStart(startLatLng, hotspots) {
 }
 
 // ── Map click handler ─────────────────────────────────────────────────────────
-function MapClickHandler({ enabled, onMapClick }) {
+function MapClickHandler({ enabled, onMapClick, onMapBackgroundClick }) {
   const map = useMap();
   useEffect(() => {
-    if (!enabled) return;
-    const handler = (e) => onMapClick([e.latlng.lat, e.latlng.lng]);
-    map.on('click', handler);
-    return () => map.off('click', handler);
-  }, [enabled, onMapClick, map]);
+    const clickHandler = (e) => {
+      if (enabled) {
+        onMapClick([e.latlng.lat, e.latlng.lng]);
+      } else {
+        onMapBackgroundClick();
+      }
+    };
+    map.on('click', clickHandler);
+    return () => map.off('click', clickHandler);
+  }, [enabled, onMapClick, onMapBackgroundClick]);
   return null;
 }
 
 // ── DASHBOARD PAGE ────────────────────────────────────────────────────────────
 function Dashboard() {
+  
   const [hoverInfo, setHoverInfo] = useState(null); // { h, x, y }
   const [zip, setZip] = useState('');
   const [scanning, setScanning] = useState(false);
@@ -373,6 +379,9 @@ function Dashboard() {
   const [activeFilter, setActiveFilter] = useState('all');
   const [scanError, setScanError] = useState('');
   const [prefetchedRoute, setPrefetchedRoute] = useState(null);
+  const [selectedZone, setSelectedZone] = useState(null);
+const sidebarRef = useRef(null);
+const cardRefs = useRef({});
 
   useEffect(() => {
     if (!selectedHotspot) {
@@ -444,14 +453,15 @@ function Dashboard() {
         lat: hotspot.lat,
         lng: hotspot.lng,
         severity: colorToSeverity(hotspot.color),
-        name: `ZIP ${zip} Hotspot #${idx + 1}`,
+        name: `Zone #${idx + 1}`,
         estimated_waste_kg: Number(hotspot.estimated_waste_kg || 0),
         cleanup_time_minutes: Number(hotspot.cleanup_time_minutes || 0),
-        waste_types: [
-          `${hotspot.pile_count} pile${hotspot.pile_count === 1 ? '' : 's'}`,
-          `Avg size ${hotspot.avg_size}/10`,
-          `Score ${hotspot.score}`,
-        ],
+        waste_types: [],
+        // waste_types: [
+        //   `${hotspot.pile_count} pile${hotspot.pile_count === 1 ? '' : 's'}`,
+        //   `Avg size ${hotspot.avg_size}/10`,
+        //   `Score ${hotspot.score}`,
+        // ],
         detected_at: hotspot.last_detected_at,
         photo: buildStreetViewUrl(hotspot.lat, hotspot.lng),
         map_preview: buildStaticMapUrl(hotspot.lat, hotspot.lng),
@@ -509,74 +519,89 @@ function Dashboard() {
         <div className="dash-logo">
           <span className="dash-sky">Sky</span><span className="dash-sweep">Sweep</span>
         </div>
-        <div className="dash-subtitle">Urban Trash Intelligence Platform</div>
       </header>
 
       {/* Zip input bar */}
       <div className="zip-bar">
-        <div className="zip-inner">
-          <div className="zip-label">📍 Enter ZIP Code to Scan</div>
-          <div className="zip-row">
-            <input
-              className="zip-input"
-              type="text"
-              placeholder="e.g. 92801"
-              maxLength={5}
-              value={zip}
-              onChange={e => setZip(e.target.value.replace(/\D/, ''))}
-              onKeyDown={e => e.key === 'Enter' && runScan()}
-            />
-            <button
-              className={`zip-btn ${scanning ? 'scanning' : ''}`}
-              onClick={runScan}
-              disabled={scanning || zip.length < 5}
-            >
-              {scanning ? <><span className="spin">🛸</span> Scanning...</> : '🚀 Run Scan'}
-            </button>
-          </div>
-          {scanError && (
-            <div style={{ marginTop: 10, color: '#ff6b6b', fontSize: 13 }}>
-              {scanError}
-            </div>
-          )}
-          {scanning && (
-            <div className="scan-progress">
-              <div className="scan-bar"><div className="scan-fill" /></div>
-              <span>Deploying drone over ZIP {zip}…</span>
-            </div>
-          )}
-          {/* Start location picker prompt */}
-          {scanDone && allHotspots.length > 0 && (
-            <div className="start-picker-bar">
-              {!startPin ? (
-                <>
-                  <span className="start-hint">
-                    {pickingStart
-                      ? '🖱️ Click anywhere on the map to set your starting location…'
-                      : '📌 Set your starting location to generate a cleanup route'}
-                  </span>
-                  <button
-                    className={`pick-btn ${pickingStart ? 'picking' : ''}`}
-                    onClick={() => setPickingStart(p => !p)}
-                  >
-                    {pickingStart ? '✕ Cancel' : '📍 Pick Start'}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <span className="start-hint start-set">
-                    ✅ Start set · Route covers {activeHotspots.length} stop{activeHotspots.length !== 1 ? 's' : ''}
-                    {skipped.size > 0 && <span className="skipped-badge">{skipped.size} skipped</span>}
-                  </span>
-                  <button className="pick-btn" onClick={() => { setStartPin(null); setRoute(null); }}>
-                    🔄 Reset
-                  </button>
-                </>
-              )}
-            </div>
+  <div className="zip-top-row">
+    <div className="zip-inner">
+      <div className="zip-label">Enter ZIP Code to Scan</div>
+      <div className="zip-row">
+        <input
+          className="zip-input"
+          type="text"
+          placeholder="e.g. 92801"
+          maxLength={5}
+          value={zip}
+          onChange={e => setZip(e.target.value.replace(/\D/, ''))}
+          onKeyDown={e => e.key === 'Enter' && runScan()}
+        />
+        <button
+          className={`zip-btn ${scanning ? 'scanning' : ''}`}
+          onClick={runScan}
+          disabled={scanning || zip.length < 5}
+        >
+          {scanning ? <><span className="spin" /> Scanning...</> : 'Run Scan'}
+        </button>
+      </div>
+      {scanError && <div style={{ marginTop: 10, color: '#ff6b6b', fontSize: 13 }}>{scanError}</div>}
+      {scanning && (
+        <div className="scan-progress">
+          <div className="scan-bar"><div className="scan-fill" /></div>
+          <span>Deploying drone over ZIP {zip}…</span>
+        </div>
+      )}
+      {scanDone && allHotspots.length > 0 && (
+        <div className="start-picker-bar">
+          {!startPin ? (
+            <>
+             <span className="start-hint">
+  {pickingStart
+    ? 'Click a dot on the map as your starting location to generate a cleanup route throughout the area'
+    : 'Click a location on the map to generate a cleanup route'}
+</span>
+              <button className={`pick-btn ${pickingStart ? 'picking' : ''}`} onClick={() => setPickingStart(p => !p)}>
+                {pickingStart ? '✕ Cancel' : 'Pick Start'}
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="start-hint start-set">
+                The route covers {activeHotspots.length} stop{activeHotspots.length !== 1 ? 's' : ''}
+                {skipped.size > 0 && <span className="skipped-badge">{skipped.size} skipped</span>}
+              </span>
+              <button className="pick-btn" onClick={() => { setStartPin(null); setRoute(null); }}>Reset</button>
+            </>
           )}
         </div>
+      )}
+    </div>
+
+    {/* Stats inline top right */}
+    {scanDone && (
+      <div className="top-stats">
+        <div className="stat-box">
+          <div className="stat-num">{activeHotspots.length}</div>
+          <div className="stat-lbl">Active Stops</div>
+        </div>
+        <div className="stat-box">
+          <div className="stat-num">{formatLbs(activeHotspots.reduce((s,h)=>s+h.estimated_waste_kg,0))}<small>lb</small></div>
+          <div className="stat-lbl">Est. Waste</div>
+        </div>
+        <div className="stat-box">
+          <div className="stat-num">{formatMinutes(activeHotspots.reduce((s,h)=>s+h.cleanup_time_minutes,0))}<small>m</small></div>
+          <div className="stat-lbl">Cleanup Time</div>
+        </div>
+        {displayRoute && (
+          <div className="stat-box">
+            <div className="stat-num">{formatMiles(displayRoute.total_distance_km)}<small>mi</small></div>
+            <div className="stat-lbl">Route Dist.</div>
+          </div>
+        )}
       </div>
+    )}
+  </div>
+</div>
 
       {/* Main layout */}
       <div className="dash-grid">
@@ -588,13 +613,18 @@ function Dashboard() {
               url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
               attribution='&copy; CartoDB'
             />
-            <MapClickHandler enabled={pickingStart} onMapClick={handleMapClick} />
+            <MapClickHandler
+  enabled={pickingStart}
+  onMapClick={handleMapClick}
+  onMapBackgroundClick={() => setSelectedZone(null)}
+/>
 
             {/* Hotspot markers */}
            {filtered.map((h, i) => {
   const isSkipped = skipped.has(h.id);
-  const routeIdx = routeStops.findIndex(r => r.id === h.id);
-  const stopNum = routeIdx >= 0 ? routeIdx + 1 : i + 1;
+  // const routeIdx = routeStops.findIndex(r => r.id === h.id);
+  // const stopNum = routeIdx >= 0 ? routeIdx + 1 : i + 1;
+  const stopNum = i + 1;
   const color = isSkipped ? '#444' : getSeverityColor(h.severity);
 
   const icon = L.divIcon({
@@ -616,14 +646,17 @@ function Dashboard() {
         position={[h.lat, h.lng]}
         icon={icon}
         eventHandlers={{
-  click: (e) => {
-    if (pickingStart) {
-      const { lat, lng } = e.latlng;
-      handleMapClick([lat, lng]);
-    } else {
-      if (!isSkipped) setSelectedHotspot(h);
-    }
-  },
+ click: (e) => {
+  if (pickingStart) {
+    handleMapClick([e.latlng.lat, e.latlng.lng]);
+  } else if (!isSkipped) {
+    console.log('clicked id:', h.id, typeof h.id);
+    setSelectedZone(h.id);
+    setTimeout(() => {
+      cardRefs.current[h.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+  }
+},
   mouseover: (e) => {
     if (!pickingStart) {
       const { x, y } = e.containerPoint;
@@ -651,35 +684,40 @@ function Dashboard() {
                 color="#00e5ff" weight={3} opacity={0.85} dashArray="8,5"
               />
             )}
-            {startPin && (
-              <Marker
-                position={startPin}
-                icon={L.divIcon({
-                  className: '',
-                  html: `<div style="
-                    width:32px;height:32px;border-radius:50%;
-                    background:white;border:3px solid #00e5ff;
-                    display:flex;align-items:center;justify-content:center;
-                    font-size:16px;
-                  ">📍</div>`,
-                  iconSize: [32, 32],
-                  iconAnchor: [16, 16],
-                })}
-              />
-            )}
+          {startPin && (
+  <Marker
+    position={startPin}
+    icon={L.divIcon({
+      className: '',
+      html: `<div style="
+        width:28px;height:28px;border-radius:50%;
+        background:#1bb7bf;border:2px solid white;
+        display:flex;align-items:center;justify-content:center;
+        font-weight:700;font-size:8px;color:#060b14;
+        box-shadow: 0 0 12px rgba(10,119,131,0.8);
+      "></div>`,
+      iconSize: [28, 28],
+      iconAnchor: [14, 14],
+    })}
+  />
+)}
             <DroneCanvas active={scanning} />
           </MapContainer>
-          {hoverInfo && (
-  <div className="map-hover-card" style={{
-    left: hoverInfo.x + 16,
-    top: hoverInfo.y - 10,
-  }}>
-    <strong>#{hoverInfo.stopNum} — {hoverInfo.h.name}</strong>
-    <div style={{ color: getSeverityColor(hoverInfo.h.severity), fontSize: 11, marginTop: 3 }}>
-      ● {hoverInfo.h.severity.toUpperCase()} · {formatLbs(hoverInfo.h.estimated_waste_kg)} lb · {formatMinutes(hoverInfo.h.cleanup_time_minutes)} min
+          {scanDone && !startPin && !scanning && allHotspots.length > 0 && (
+  <div className="map-instruction">
+    <div className="map-instruction-inner">
+      Click the <strong>Pick Start</strong> button above to start planning your route
     </div>
-    <div style={{ fontSize: 11, color: '#aaa', marginTop: 3 }}>Click to view photo →</div>
   </div>
+)}
+          {hoverInfo && (
+ <div className="map-hover-card" style={{ left: hoverInfo.x + 16, top: hoverInfo.y - 10 }}>
+  <strong>Stop #{hoverInfo.stopNum}</strong>
+  <div style={{ color: getSeverityColor(hoverInfo.h.severity), fontSize: 11, marginTop: 3 }}>
+    ● {hoverInfo.h.severity.toUpperCase()} · {formatLbs(hoverInfo.h.estimated_waste_kg)}lb · {formatMinutes(hoverInfo.h.cleanup_time_minutes)}min
+  </div>
+  <div style={{ fontSize: 11, color: '#aaa', marginTop: 3 }}>Click to view photo</div>
+</div>
 )}
 
           {/* Crosshair overlay when picking */}
@@ -691,44 +729,22 @@ function Dashboard() {
 
           {!scanDone && !scanning && (
             <div className="map-idle">
-              <div className="map-idle-icon">🛸</div>
+              {/* <div className="map-idle-icon">🛸</div> */}
               <div>Enter a ZIP code above to deploy drone scan</div>
             </div>
           )}
           {scanDone && !scanning && allHotspots.length === 0 && (
             <div className="map-idle">
-              <div className="map-idle-icon">✅</div>
-              <div>No hotspots detected for this scan.</div>
+              <div className="map-idle-icon"></div>
+              <div>No zones detected for this scan.</div>
             </div>
           )}
         </div>
 
         {/* Sidebar */}
-        <div className="sidebar">
-          {/* Stats */}
-          {scanDone && (
-            <div className="stats-row">
-              <div className="stat-box">
-                <div className="stat-num">{activeHotspots.length}</div>
-                <div className="stat-lbl">Active Stops</div>
-              </div>
-              <div className="stat-box">
-                <div className="stat-num">{formatLbs(activeHotspots.reduce((s,h)=>s+h.estimated_waste_kg,0))}<small>lb</small></div>
-                <div className="stat-lbl">Est. Waste</div>
-              </div>
-              <div className="stat-box">
-                <div className="stat-num">{formatMinutes(activeHotspots.reduce((s,h)=>s+h.cleanup_time_minutes,0))}<small>m</small></div>
-                <div className="stat-lbl">Cleanup Time</div>
-              </div>
-              {displayRoute && (
-                <div className="stat-box">
-                  <div className="stat-num">{formatMiles(displayRoute.total_distance_km)}<small>mi</small></div>
-                  <div className="stat-lbl">Route Dist.</div>
-                </div>
-              )}
-            </div>
-          )}
-
+        <div className="sidebar" ref={sidebarRef}>
+          
+        
           {/* Filter tabs */}
           {scanDone && (
             <div className="filter-tabs">
@@ -744,30 +760,31 @@ function Dashboard() {
           {/* Hotspot list */}
           {filtered.length > 0 && (
             <div className="hotspot-list-scroll">
-              <div className="list-title">📍 Detected Hotspots</div>
+              <div className="list-title">Detected Zones</div>
               {filtered.map((h, i) => {
                 const isSkipped = skipped.has(h.id);
                 return (
                   <div key={h.id}
-                    className={`hspot-card sev-${h.severity} ${isSkipped ? 'hspot-skipped' : ''}`}
-                    onClick={() => !isSkipped && setSelectedHotspot(h)}
-                  >
+  ref={el => cardRefs.current[h.id] = el}
+  className={`hspot-card sev-${h.severity} ${isSkipped ? 'hspot-skipped' : ''} ${selectedZone === h.id ? 'hspot-selected' : ''}`}
+  onClick={() => { if (!isSkipped) { setSelectedHotspot(h); setSelectedZone(null); } }}
+>
                     <div className="hspot-top">
-                      <div className="hspot-rank">#{i + 1}</div>
+                      {/* <div className="hspot-rank">#{i + 1}</div> */}
                       <div className="hspot-name">{h.name}</div>
                       <div className="hspot-badge" style={{ background: isSkipped ? '#444' : getSeverityColor(h.severity) }}>
                         {isSkipped ? 'SKIPPED' : h.severity.toUpperCase()}
                       </div>
                     </div>
                     <div className="hspot-meta">
-                      <span>⚖️ {formatLbs(h.estimated_waste_kg)} lb</span>
-                      <span>⏱ {formatMinutes(h.cleanup_time_minutes)} min</span>
+                      <span>Weight: {formatLbs(h.estimated_waste_kg)} lb</span>
+                      <span>Time: {formatMinutes(h.cleanup_time_minutes)} min</span>
                     </div>
                     <div className="hspot-types">
                       {h.waste_types.map(t => <span key={t} className="wtype">{t}</span>)}
                     </div>
                     <div className="hspot-actions">
-                      {!isSkipped && <div className="hspot-photo-hint">📸 Click to view site photo</div>}
+                      {!isSkipped && <div className="hspot-photo-hint">Click to view site photo</div>}
                       <button
                         className={`skip-btn ${isSkipped ? 'restore-btn' : ''}`}
                         onClick={(e) => toggleSkip(h.id, e)}
@@ -782,10 +799,10 @@ function Dashboard() {
           )}
 
           {/* Route steps — only shown when start pin is set */}
-          {displayRoute && scanDone && routeStops.length > 0 && (
+          {/* {displayRoute && scanDone && routeStops.length > 0 && (
             <div className="route-panel">
-              <div className="list-title">🗺️ Your Cleanup Route</div>
-              <div className="route-start-label">{startPin ? '📍 Your Start →' : '🧭 Suggested Route'}</div>
+              <div className="list-title">Your Cleanup Route</div>
+              <div className="route-start-label">{startPin ? 'Your Start →' : 'Suggested Route'}</div>
               {routeStops.map((h, i) => (
                 <div key={h.id} className="route-step-card">
                   <div className="rstep-num" style={{ background: getSeverityColor(h.severity) }}>{i + 1}</div>
@@ -800,32 +817,32 @@ function Dashboard() {
                 {formatMiles(displayRoute.total_distance_km)} mi · {formatMinutes(displayRoute.total_time_minutes)} min · {formatLbs(displayRoute.total_waste_kg)} lb total
               </div>
             </div>
-          )}
+          )} */}
 
           {/* No start pin yet but scan done */}
           {scanDone && !startPin && (
             <div className="sidebar-empty" style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 32 }}>📍</div>
-              <div>Click <strong>"Pick Start"</strong> above then tap the map to set where you're cleaning from</div>
+              <div style={{ fontSize: 32 }}></div>
+              {/* <div>Click <strong>"Pick Start"</strong> above then tap the map to set where you're cleaning from</div> */}
             </div>
           )}
 
           {!scanDone && !scanning && (
             <div className="sidebar-empty">
-              <div style={{ fontSize: 40 }}>🛸</div>
+              <div style={{ fontSize: 40 }}></div>
               <div>Scan results will appear here</div>
             </div>
           )}
           {scanning && (
             <div className="sidebar-empty">
-              <div className="big-spin">🛸</div>
+              {/* <div className="big-spin">🛸</div> */}
               <div>Drone scanning ZIP {zip}…</div>
               <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>Detecting trash hotspots via YOLO</div>
             </div>
           )}
           {scanDone && !scanning && allHotspots.length === 0 && (
             <div className="sidebar-empty">
-              <div style={{ fontSize: 40 }}>✅</div>
+              <div style={{ fontSize: 40 }}></div>
               <div>No hotspots found in this scan.</div>
             </div>
           )}
