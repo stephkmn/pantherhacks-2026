@@ -205,9 +205,9 @@ function TitlePage({ onEnter }) {
     const fly = () => {
       setDronePos(waypoints[idx % waypoints.length]);
       idx++;
-      timeouts.push(setTimeout(fly, 1800));
+      timeouts.push(setTimeout(fly, 1200));
     };
-    timeouts.push(setTimeout(fly, 400));
+    timeouts.push(setTimeout(fly, 0));
     return () => timeouts.forEach(clearTimeout);
   }, []);
 
@@ -219,26 +219,9 @@ function TitlePage({ onEnter }) {
       <div
         className="drone-fly"
         style={{ left: `${dronePos.x}vw`, top: `${dronePos.y}vh`, transform: `rotate(${dronePos.rot}deg)` }}
-      >
-        <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-          {/* Arms */}
-          <line x1="32" y1="32" x2="8"  y2="8"  stroke="#00e5ff" strokeWidth="2" strokeLinecap="round"/>
-          <line x1="32" y1="32" x2="56" y2="8"  stroke="#00e5ff" strokeWidth="2" strokeLinecap="round"/>
-          <line x1="32" y1="32" x2="8"  y2="56" stroke="#00e5ff" strokeWidth="2" strokeLinecap="round"/>
-          <line x1="32" y1="32" x2="56" y2="56" stroke="#00e5ff" strokeWidth="2" strokeLinecap="round"/>
-          {/* Rotors */}
-          <ellipse cx="8"  cy="8"  rx="7" ry="3" fill="#00e5ff" opacity="0.7"><animateTransform attributeName="transform" type="rotate" from="0 8 8"   to="360 8 8"   dur="0.3s" repeatCount="indefinite"/></ellipse>
-          <ellipse cx="56" cy="8"  rx="7" ry="3" fill="#00e5ff" opacity="0.7"><animateTransform attributeName="transform" type="rotate" from="0 56 8"  to="360 56 8"  dur="0.3s" repeatCount="indefinite"/></ellipse>
-          <ellipse cx="8"  cy="56" rx="7" ry="3" fill="#00e5ff" opacity="0.7"><animateTransform attributeName="transform" type="rotate" from="0 8 56"  to="360 8 56"  dur="0.25s" repeatCount="indefinite"/></ellipse>
-          <ellipse cx="56" cy="56" rx="7" ry="3" fill="#00e5ff" opacity="0.7"><animateTransform attributeName="transform" type="rotate" from="0 56 56" to="360 56 56" dur="0.25s" repeatCount="indefinite"/></ellipse>
-          {/* Body */}
-          <rect x="26" y="26" width="12" height="12" rx="3" fill="#0c1527" stroke="#00e5ff" strokeWidth="1.5"/>
-          {/* Camera lens */}
-          <circle cx="32" cy="32" r="3" fill="#00e5ff" opacity="0.9"/>
-          <circle cx="32" cy="32" r="1.2" fill="#060b14"/>
-        </svg>
-        <div className="drone-fly-ring r1" />
-        <div className="drone-fly-ring r2" />
+       >
+        <img src="/drone.png" alt="drone" width="120" />
+      
         {/* 🛸
         <div className="drone-fly-ring r1" />
         <div className="drone-fly-ring r2" /> */}

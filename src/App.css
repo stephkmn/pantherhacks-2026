@@ -160,15 +160,17 @@ body {
 
 /* Floating drone */
 /* Flying drone */
+
 .drone-fly {
   position: fixed;
   z-index: 10;
   pointer-events: none;
-  filter: drop-shadow(0 0 12px rgba(0, 229, 255, 0.8));
-  transition: left 1.6s cubic-bezier(0.45, 0, 0.55, 1),
-              top  1.6s cubic-bezier(0.45, 0, 0.55, 1),
-              transform 1.6s ease;
+  filter: drop-shadow(0 0 16px rgba(0, 229, 255, 0.5));
+  transition: left 1.0s cubic-bezier(0.45, 0, 0.55, 1),
+              top  1.0s cubic-bezier(0.45, 0, 0.55, 1),
+              transform 1.0s ease;
 }
+
 
 .drone-fly-ring {
   position: absolute;
