@@ -1,6 +1,7 @@
 import io
 import os
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -95,6 +96,74 @@ class CleanSkyApiTests(unittest.TestCase):
         self.assertIn("detections", payload)
         self.assertIn("model_loaded", payload)
         self.assertIn("estimated_waste_kg", payload)
+        self.assertIn("persisted_detection_count", payload)
+
+    def test_detect_image_skips_persistence_when_no_detections(self):
+        self.client.post("/api/rounds/start", json={"drone_round_id": "round_detect_none"}, headers=INGEST_HEADERS)
+
+        image = Image.new("RGB", (64, 64), color="white")
+        bytes_buffer = io.BytesIO()
+        image.save(bytes_buffer, format="PNG")
+        bytes_buffer.seek(0)
+
+        response = self.client.post(
+            "/api/detect-image",
+            files={"file": ("sample.png", bytes_buffer, "image/png")},
+            data={
+                "round_id": "round_detect_none",
+                "drone_id": "phone_demo",
+                "lat": "33.8446",
+                "lng": "-117.9539",
+            },
+            headers=INGEST_HEADERS,
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["persisted_detection_count"], 0)
+        self.assertEqual(payload["persisted_entries"], [])
+        self.assertEqual(payload["persistence_skipped_reason"], "no_detections")
+
+    def test_detect_image_persists_entries_when_detections_present(self):
+        self.client.post("/api/rounds/start", json={"drone_round_id": "round_detect_yes"}, headers=INGEST_HEADERS)
+
+        image = Image.new("RGB", (100, 100), color="white")
+        bytes_buffer = io.BytesIO()
+        image.save(bytes_buffer, format="PNG")
+        bytes_buffer.seek(0)
+
+        fake_result = {
+            "status": "ok",
+            "message": "Image analyzed successfully.",
+            "filename": "sample.png",
+            "model_loaded": True,
+            "fallback_reason": None,
+            "detections": [
+                {"class": "trash", "confidence": 0.92, "bbox": [10.0, 10.0, 70.0, 70.0]},
+            ],
+            "total_objects": 1,
+            "average_confidence": 0.92,
+            "image_size": [100, 100],
+            "estimated_waste_kg": 0.05,
+        }
+
+        with patch("backend.main.detect_trash_yolo_from_bytes", return_value=fake_result):
+            response = self.client.post(
+                "/api/detect-image",
+                files={"file": ("sample.png", bytes_buffer, "image/png")},
+                data={
+                    "round_id": "round_detect_yes",
+                    "drone_id": "phone_demo",
+                    "lat": "33.8446",
+                    "lng": "-117.9539",
+                },
+                headers=INGEST_HEADERS,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["persisted_detection_count"], 1)
+        self.assertEqual(len(payload["persisted_entries"]), 1)
+        self.assertIsNone(payload["persistence_skipped_reason"])
 
     def test_detect_image_rejects_non_image(self):
         response = self.client.post(

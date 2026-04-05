@@ -88,6 +88,8 @@ class DetectImageResponse(BaseModel):
     estimated_waste_kg: float = Field(ge=0)
     photo_url: str | None = None
     persisted_entries: list[dict[str, Any]] = Field(default_factory=list)
+    persisted_detection_count: int = Field(default=0, ge=0)
+    persistence_skipped_reason: str | None = None
 
 
 class ErrorEnvelope(BaseModel):
@@ -621,53 +623,59 @@ async def detect_trash_in_image(
 
     photo_url: str | None = None
     persisted_entries: list[dict[str, Any]] = []
+    persistence_skipped_reason: str | None = None
     if round_id is not None and drone_id is not None and lat is not None and lng is not None:
-        try:
-            ingest_lat = float(lat)
-            ingest_lng = float(lng)
-            photo_url = _data_store().upload_detection_image(contents, file.filename or "uploaded-image")
-            record_time = detected_at or datetime.now(timezone.utc)
-            for det in mapped_detections:
-                entry = _data_store().insert_trash_entry(
-                    round_id=round_id,
-                    drone_id=drone_id,
-                    lat=ingest_lat,
-                    lng=ingest_lng,
-                    size=_size_from_bbox(det["bbox"], yolo_result["image_size"]),
-                    detected_at=record_time,
-                    meta={
-                        "detection": det,
-                        "photo_url": photo_url,
-                        "source": "detect-image",
-                        "filename": file.filename,
+        if mapped_detections:
+            try:
+                ingest_lat = float(lat)
+                ingest_lng = float(lng)
+                photo_url = _data_store().upload_detection_image(contents, file.filename or "uploaded-image")
+                record_time = detected_at or datetime.now(timezone.utc)
+                for det in mapped_detections:
+                    entry = _data_store().insert_trash_entry(
+                        round_id=round_id,
+                        drone_id=drone_id,
+                        lat=ingest_lat,
+                        lng=ingest_lng,
+                        size=_size_from_bbox(det["bbox"], yolo_result["image_size"]),
+                        detected_at=record_time,
+                        meta={
+                            "detection": det,
+                            "photo_url": photo_url,
+                            "source": "detect-image",
+                            "filename": file.filename,
+                        },
+                    )
+                    persisted_entries.append(
+                        {
+                            "id": entry.id,
+                            "round_id": entry.round_id,
+                            "drone_id": entry.drone_id,
+                            "detected_at": entry.detected_at.isoformat(),
+                            "lat": entry.lat,
+                            "lng": entry.lng,
+                            "size": entry.size,
+                            "meta": entry.meta,
+                        }
+                    )
+            except RuntimeError as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "code": "INGEST_PERSISTENCE_FAILED",
+                        "message": (
+                            f"Detection persistence failed: {exc}. "
+                            "Verify SUPABASE_URL connectivity, storage bucket existence, and that round_id exists."
+                        ),
                     },
-                )
-                persisted_entries.append(
-                    {
-                        "id": entry.id,
-                        "round_id": entry.round_id,
-                        "drone_id": entry.drone_id,
-                        "detected_at": entry.detected_at.isoformat(),
-                        "lat": entry.lat,
-                        "lng": entry.lng,
-                        "size": entry.size,
-                        "meta": entry.meta,
-                    }
-                )
-        except RuntimeError as exc:
-            raise HTTPException(
-                status_code=502,
-                detail={
-                    "code": "INGEST_PERSISTENCE_FAILED",
-                    "message": (
-                        f"Detection persistence failed: {exc}. "
-                        "Verify SUPABASE_URL connectivity, storage bucket existence, and that round_id exists."
-                    ),
-                },
-            ) from exc
+                ) from exc
+        else:
+            persistence_skipped_reason = "no_detections"
 
     yolo_result["photo_url"] = photo_url
     yolo_result["persisted_entries"] = persisted_entries
+    yolo_result["persisted_detection_count"] = len(persisted_entries)
+    yolo_result["persistence_skipped_reason"] = persistence_skipped_reason
     return yolo_result
 
 

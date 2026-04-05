@@ -53,6 +53,7 @@ function HotspotImage({ hotspot, alt, className, style }) {
 
 const formatKg = (value) => Number(value || 0).toFixed(2);
 const formatMinutes = (value) => Math.round(Number(value || 0));
+const buildDefaultRoundId = () => `phone_demo_${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}`;
 // ── Nearest-neighbor route builder ───────────────────────────────────────────
 // Haversine distance in km between two [lat,lng] points
 function haversine([lat1, lng1], [lat2, lng2]) {
@@ -840,10 +841,286 @@ function Dashboard() {
   );
 }
 
+function MobileDetectorDemo() {
+  const fileInputRef = useRef(null);
+  const [ingestKey, setIngestKey] = useState('');
+  const [droneId, setDroneId] = useState('phone_demo');
+  const [roundDraft, setRoundDraft] = useState(buildDefaultRoundId);
+  const [roundId, setRoundId] = useState('');
+  const [sessionError, setSessionError] = useState('');
+  const [sessionStarting, setSessionStarting] = useState(false);
+  const [captureFile, setCaptureFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [lat, setLat] = useState('');
+  const [lng, setLng] = useState('');
+  const [locationLabel, setLocationLabel] = useState('Location not captured yet');
+  const [locating, setLocating] = useState(false);
+  const [detecting, setDetecting] = useState(false);
+  const [detectError, setDetectError] = useState('');
+  const [result, setResult] = useState(null);
+
+  useEffect(() => {
+    if (!captureFile) {
+      setPreviewUrl('');
+      return undefined;
+    }
+    const nextUrl = URL.createObjectURL(captureFile);
+    setPreviewUrl(nextUrl);
+    return () => URL.revokeObjectURL(nextUrl);
+  }, [captureFile]);
+
+  const captureLocation = async () => {
+    if (!navigator.geolocation) {
+      setLocationLabel('Geolocation is unavailable on this device');
+      return null;
+    }
+
+    setLocating(true);
+    setDetectError('');
+    try {
+      const position = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 30000,
+        });
+      });
+      const nextLat = position.coords.latitude.toFixed(6);
+      const nextLng = position.coords.longitude.toFixed(6);
+      setLat(nextLat);
+      setLng(nextLng);
+      setLocationLabel(`Using live GPS: ${nextLat}, ${nextLng}`);
+      return { lat: nextLat, lng: nextLng };
+    } catch (error) {
+      setLocationLabel('Location unavailable. Enter coordinates manually if phone GPS is blocked.');
+      return null;
+    } finally {
+      setLocating(false);
+    }
+  };
+
+  const ensureSession = async () => {
+    if (roundId) return roundId;
+    if (!ingestKey.trim()) {
+      throw new Error('Enter the ingest API key before starting the phone demo.');
+    }
+
+    setSessionStarting(true);
+    setSessionError('');
+    try {
+      const response = await axios.post(
+        '/api/rounds/start',
+        { drone_round_id: roundDraft.trim() || buildDefaultRoundId() },
+        { headers: { 'X-API-Key': ingestKey.trim() } },
+      );
+      setRoundId(response.data.id);
+      return response.data.id;
+    } catch (error) {
+      const message = error?.response?.data?.error?.message || 'Unable to start a demo round.';
+      setSessionError(message);
+      throw new Error(message);
+    } finally {
+      setSessionStarting(false);
+    }
+  };
+
+  const handleFileChange = (event) => {
+    const nextFile = event.target.files?.[0];
+    if (!nextFile) return;
+    setCaptureFile(nextFile);
+    setDetectError('');
+    setResult(null);
+  };
+
+  const runDetection = async () => {
+    if (!captureFile) {
+      setDetectError('Take a photo first so we have an image to analyze.');
+      return;
+    }
+    if (!droneId.trim()) {
+      setDetectError('Set a device label so the trash entry has a source.');
+      return;
+    }
+
+    setDetecting(true);
+    setDetectError('');
+    try {
+      const activeRoundId = await ensureSession();
+      let activeLat = lat.trim();
+      let activeLng = lng.trim();
+      if (!activeLat || !activeLng) {
+        const gps = await captureLocation();
+        activeLat = gps?.lat || activeLat;
+        activeLng = gps?.lng || activeLng;
+      }
+      if (!activeLat || !activeLng) {
+        throw new Error('Location is required to create a trash entry. Allow GPS or enter lat/lng manually.');
+      }
+
+      const formData = new FormData();
+      formData.append('file', captureFile);
+      formData.append('round_id', activeRoundId);
+      formData.append('drone_id', droneId.trim());
+      formData.append('lat', activeLat);
+      formData.append('lng', activeLng);
+      formData.append('detected_at', new Date().toISOString());
+
+      const response = await axios.post('/api/detect-image', formData, {
+        headers: {
+          'X-API-Key': ingestKey.trim(),
+        },
+      });
+      setResult(response.data);
+    } catch (error) {
+      setDetectError(error?.response?.data?.error?.message || error.message || 'Detection failed.');
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  return (
+    <div className="mobile-demo">
+      <div className="mobile-demo__hero">
+        <div className="mobile-demo__eyebrow">Phone Trash Demo</div>
+        <h1>Walk the building, snap trash, and upload every hit.</h1>
+        <p>
+          Use your phone camera, run the vision model on the backend, then save the photo and trash entries in one flow.
+        </p>
+      </div>
+
+      <div className="mobile-demo__panel">
+        <div className="mobile-demo__grid">
+          <label className="mobile-demo__field">
+            <span>Ingest API Key</span>
+            <input
+              type="password"
+              value={ingestKey}
+              onChange={(event) => setIngestKey(event.target.value)}
+              placeholder="dev-ingest-key"
+              autoComplete="off"
+            />
+          </label>
+          <label className="mobile-demo__field">
+            <span>Device ID</span>
+            <input value={droneId} onChange={(event) => setDroneId(event.target.value)} placeholder="phone_demo" />
+          </label>
+          <label className="mobile-demo__field">
+            <span>Round ID</span>
+            <input value={roundDraft} onChange={(event) => setRoundDraft(event.target.value)} placeholder="phone_demo_20260405" />
+          </label>
+          <button className="mobile-demo__button mobile-demo__button--secondary" onClick={ensureSession} disabled={sessionStarting}>
+            {roundId ? 'Session Ready' : sessionStarting ? 'Starting...' : 'Start Session'}
+          </button>
+        </div>
+        <div className="mobile-demo__session">
+          <div>{roundId ? `Active round: ${roundId}` : 'No round started yet'}</div>
+          <div>{locationLabel}</div>
+          {sessionError && <div className="mobile-demo__error">{sessionError}</div>}
+        </div>
+      </div>
+
+      <div className="mobile-demo__panel">
+        <div className="mobile-demo__actions">
+          <button className="mobile-demo__button" onClick={() => fileInputRef.current?.click()}>
+            {captureFile ? 'Retake Photo' : 'Take Photo'}
+          </button>
+          <button className="mobile-demo__button mobile-demo__button--secondary" onClick={captureLocation} disabled={locating}>
+            {locating ? 'Finding GPS...' : 'Use Current Location'}
+          </button>
+          <button className="mobile-demo__button" onClick={runDetection} disabled={detecting || !captureFile}>
+            {detecting ? 'Detecting...' : 'Detect Trash'}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleFileChange}
+            style={{ display: 'none' }}
+          />
+        </div>
+
+        <div className="mobile-demo__grid">
+          <label className="mobile-demo__field">
+            <span>Latitude</span>
+            <input value={lat} onChange={(event) => setLat(event.target.value)} placeholder="33.844600" />
+          </label>
+          <label className="mobile-demo__field">
+            <span>Longitude</span>
+            <input value={lng} onChange={(event) => setLng(event.target.value)} placeholder="-117.953900" />
+          </label>
+        </div>
+
+        {detectError && <div className="mobile-demo__error">{detectError}</div>}
+
+        <div className="mobile-demo__preview">
+          {previewUrl ? (
+            <div className="mobile-demo__image-wrap">
+              <img src={previewUrl} alt="Captured trash scan" className="mobile-demo__image" />
+              {result?.detections?.map((det, index) => {
+                const [x1, y1, x2, y2] = det.bbox;
+                const [width, height] = result.image_size || [1, 1];
+                return (
+                  <div
+                    key={`${det.class_name || det.class}-${index}`}
+                    className="mobile-demo__bbox"
+                    style={{
+                      left: `${(x1 / width) * 100}%`,
+                      top: `${(y1 / height) * 100}%`,
+                      width: `${((x2 - x1) / width) * 100}%`,
+                      height: `${((y2 - y1) / height) * 100}%`,
+                    }}
+                  >
+                    <span>{det.class_name || det.class} {(Number(det.confidence) * 100).toFixed(0)}%</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mobile-demo__placeholder">Your captured image will appear here.</div>
+          )}
+        </div>
+      </div>
+
+      {result && (
+        <div className="mobile-demo__panel">
+          <div className="mobile-demo__result-header">
+            <h2>Last Detection</h2>
+            <div>{result.total_objects} object{result.total_objects === 1 ? '' : 's'} found</div>
+          </div>
+          <div className="mobile-demo__stats">
+            <div className="mobile-demo__stat">
+              <strong>{(Number(result.average_confidence || 0) * 100).toFixed(0)}%</strong>
+              <span>Avg confidence</span>
+            </div>
+            <div className="mobile-demo__stat">
+              <strong>{result.persisted_detection_count || 0}</strong>
+              <span>Trash entries saved</span>
+            </div>
+            <div className="mobile-demo__stat">
+              <strong>{result.photo_url ? 'Yes' : 'No'}</strong>
+              <span>Photo uploaded</span>
+            </div>
+          </div>
+          {result.photo_url && (
+            <a className="mobile-demo__link" href={result.photo_url} target="_blank" rel="noreferrer">
+              Open uploaded photo
+            </a>
+          )}
+          {!result.photo_url && result.persistence_skipped_reason === 'no_detections' && (
+            <div className="mobile-demo__hint">No trash was detected, so the backend skipped the S3 upload and trash-entry write.</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── ROOT ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const dashRef = useRef(null);
   const [started, setStarted] = useState(false);
+  const isMobileDemo = new URLSearchParams(window.location.search).get('demo') === 'mobile';
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -855,6 +1132,10 @@ export default function App() {
       dashRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, 50);
   };
+
+  if (isMobileDemo) {
+    return <MobileDetectorDemo />;
+  }
 
   return (
     <div>
