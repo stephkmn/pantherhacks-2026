@@ -1,8 +1,12 @@
 # SkySweep
 
-SkySweep is a trash-detection and cleanup coordination platform built for PantherHacks 2026. It combines computer vision, live geotagged image capture, hotspot scoring, and routing into a single workflow so teams can find litter faster and respond more efficiently.
+SkySweep is a computer-vision-powered trash detection platform built for PantherHacks 2026. It helps communities find litter, document it with photos and location data, and turn those observations into actionable cleanup plans.
 
-The project started from a simple question: what if waste detection worked more like a live operations system instead of a manual reporting form? SkySweep treats trash as a field-detection problem. A drone, phone camera, or uploaded image can be analyzed for visible waste, mapped to a real location, and turned into actionable cleanup data.
+At its core, SkySweep answers a simple problem: trash is easy to overlook, hard to report consistently, and expensive to clean up once it spreads. Instead of relying on manual reports alone, SkySweep treats litter as something that can be detected, mapped, prioritized, and responded to in real time.
+
+The system uses camera input from a drone, a phone, or an uploaded image to detect visible waste, draw bounding boxes around it, save the evidence, and create location-aware records in the database. Those records can then be grouped into hotspots, scored by severity, and used to plan cleanup routes.
+
+In the live demo experience, a user can walk around with a phone camera while SkySweep watches for trash, uploads detected frames, and records new trash entries automatically. The result is a project that feels less like a static reporting tool and more like an environmental operations platform.
 
 ## What It Does
 
