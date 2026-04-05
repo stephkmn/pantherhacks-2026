@@ -10,3 +10,5 @@ backend/tests/image_test_outputs/
 backend/models/
 
 supabase/
+dist/
+dist/index.html
