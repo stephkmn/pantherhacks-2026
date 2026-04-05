@@ -115,6 +115,154 @@ class TrashEntry:
     meta: dict[str, Any]
 
 
+@dataclass
+class DisposalSite:
+    id: str
+    name: str
+    lat: float
+    lng: float
+    site_type: str
+    accepted_types: list[str]
+    hours: str
+    active: bool = True
+
+
+DISPOSAL_SITES: list[DisposalSite] = [
+    DisposalSite(
+        id="site_oc_hb_recycling_1",
+        name="Huntington Beach Recycling Center",
+        lat=33.6859,
+        lng=-117.9988,
+        site_type="recycling_center",
+        accepted_types=["plastic", "glass", "aluminum", "paper"],
+        hours="Mon-Sat 8:00 AM - 5:00 PM",
+    ),
+    DisposalSite(
+        id="site_oc_costa_mesa_transfer_1",
+        name="Costa Mesa Transfer Station",
+        lat=33.6638,
+        lng=-117.9108,
+        site_type="transfer_station",
+        accepted_types=["mixed_waste", "bulk_item", "yard_waste"],
+        hours="Mon-Sat 7:00 AM - 4:00 PM",
+    ),
+    DisposalSite(
+        id="site_oc_irvine_recovery_1",
+        name="Irvine Resource Recovery",
+        lat=33.6653,
+        lng=-117.7517,
+        site_type="recycling_center",
+        accepted_types=["plastic", "metal", "cardboard", "e_waste"],
+        hours="Mon-Fri 8:30 AM - 5:30 PM",
+    ),
+    DisposalSite(
+        id="site_oc_newport_harbor_clean_1",
+        name="Newport Harbor Waste Drop-off",
+        lat=33.6081,
+        lng=-117.9298,
+        site_type="harbor_dropoff",
+        accepted_types=["marine_debris", "plastic", "glass"],
+        hours="Daily 7:00 AM - 7:00 PM",
+    ),
+    DisposalSite(
+        id="site_oc_laguna_beach_services_1",
+        name="Laguna Beach Public Works Yard",
+        lat=33.5426,
+        lng=-117.7832,
+        site_type="public_works",
+        accepted_types=["mixed_waste", "plastic", "metal"],
+        hours="Mon-Fri 7:30 AM - 4:30 PM",
+    ),
+    DisposalSite(
+        id="site_oc_anaheim_recycle_1",
+        name="Anaheim Community Recycling Hub",
+        lat=33.8342,
+        lng=-117.8932,
+        site_type="recycling_center",
+        accepted_types=["plastic", "glass", "paper", "aluminum"],
+        hours="Mon-Sat 8:00 AM - 6:00 PM",
+    ),
+    DisposalSite(
+        id="site_sf_pier_recovery_1",
+        name="SF Pier 96 Materials Recovery",
+        lat=37.7424,
+        lng=-122.3779,
+        site_type="transfer_station",
+        accepted_types=["mixed_waste", "metal", "construction_debris"],
+        hours="Mon-Sat 7:00 AM - 5:00 PM",
+    ),
+    DisposalSite(
+        id="site_sf_bayshore_recycle_1",
+        name="Bayshore Recycling Drop-off",
+        lat=37.7088,
+        lng=-122.4046,
+        site_type="recycling_center",
+        accepted_types=["plastic", "glass", "cardboard"],
+        hours="Mon-Fri 9:00 AM - 5:00 PM",
+    ),
+    DisposalSite(
+        id="site_oakland_port_waste_1",
+        name="Port of Oakland Cleanup Depot",
+        lat=37.7988,
+        lng=-122.3075,
+        site_type="port_depot",
+        accepted_types=["marine_debris", "mixed_waste", "metal"],
+        hours="Daily 6:00 AM - 6:00 PM",
+    ),
+    DisposalSite(
+        id="site_oakland_recycle_hub_1",
+        name="Oakland West Recycling Hub",
+        lat=37.8124,
+        lng=-122.2997,
+        site_type="recycling_center",
+        accepted_types=["plastic", "paper", "aluminum", "glass"],
+        hours="Mon-Sat 8:00 AM - 5:00 PM",
+    ),
+    DisposalSite(
+        id="site_berkeley_transfer_1",
+        name="Berkeley Transfer Station",
+        lat=37.8537,
+        lng=-122.2937,
+        site_type="transfer_station",
+        accepted_types=["mixed_waste", "yard_waste", "bulk_item"],
+        hours="Mon-Sat 8:00 AM - 4:30 PM",
+    ),
+    DisposalSite(
+        id="site_sj_materials_1",
+        name="San Jose Materials Recovery",
+        lat=37.3481,
+        lng=-121.9227,
+        site_type="recycling_center",
+        accepted_types=["plastic", "cardboard", "metal", "glass"],
+        hours="Mon-Fri 8:00 AM - 5:00 PM",
+    ),
+]
+
+
+def _nearby_disposal_sites_static(lat: float, lng: float, limit: int) -> list[dict[str, Any]]:
+    capped_limit = max(1, min(limit, 10))
+    ranked = sorted(
+        (site for site in DISPOSAL_SITES if site.active),
+        key=lambda site: _haversine_km(lat, lng, site.lat, site.lng),
+    )
+    results: list[dict[str, Any]] = []
+    for site in ranked[:capped_limit]:
+        distance = _haversine_km(lat, lng, site.lat, site.lng)
+        results.append(
+            {
+                "site_id": site.id,
+                "name": site.name,
+                "lat": site.lat,
+                "lng": site.lng,
+                "site_type": site.site_type,
+                "accepted_types": site.accepted_types,
+                "hours": site.hours,
+                "distance_km": round(distance, 2),
+            }
+        )
+    return results
+
+
 class DataStore(Protocol):
     def start_new_round(self, round_id: str | None = None) -> DroneRound:
         ...
@@ -145,6 +293,9 @@ class DataStore(Protocol):
         ...
 
     def upload_detection_image(self, image_bytes: bytes, filename: str) -> str | None:
+        ...
+
+    def get_nearby_disposal_sites(self, lat: float, lng: float, limit: int = 3) -> list[dict[str, Any]]:
         ...
 
 
@@ -277,6 +428,9 @@ class InMemoryDataStore:
 
     def upload_detection_image(self, image_bytes: bytes, filename: str) -> str | None:
         return None
+
+    def get_nearby_disposal_sites(self, lat: float, lng: float, limit: int = 3) -> list[dict[str, Any]]:
+        return _nearby_disposal_sites_static(lat=lat, lng=lng, limit=limit)
 
 
 class SupabaseDataStore:
@@ -424,6 +578,16 @@ class SupabaseDataStore:
             "get_hotspots_by_zip",
             {"zip_code_in": zip_code, "radius_m_in": int(radius_km * 1000)},
         )
+
+    def get_nearby_disposal_sites(self, lat: float, lng: float, limit: int = 3) -> list[dict[str, Any]]:
+        try:
+            return self._rpc(
+                "get_nearby_disposal_sites",
+                {"lat_in": lat, "lng_in": lng, "limit_in": max(1, min(limit, 10))},
+            )
+        except RuntimeError:
+            # Local fallback keeps demos working even if RPC hasn't been applied yet.
+            return _nearby_disposal_sites_static(lat=lat, lng=lng, limit=limit)
 
 
 _DATA_STORE: DataStore | None = None

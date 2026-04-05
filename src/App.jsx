@@ -243,7 +243,7 @@ function TitlePage({ onEnter }) {
   );
 }
 // ── PHOTO MODAL ───────────────────────────────────────────────────────────────
-function PhotoModal({ hotspot, onClose }) {
+function PhotoModal({ hotspot, onClose, disposalSites, disposalLoading, disposalError }) {
   if (!hotspot) return null;
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -274,6 +274,28 @@ function PhotoModal({ hotspot, onClose }) {
             {hotspot.severity === 'high'
               ? '⚠️ Crew deployment recommended for this site'
               : '✅ Single operator sufficient'}
+          </div>
+          <div className="modal-disposal">
+            <div className="modal-disposal-title">Nearby Disposal Sites</div>
+            {disposalLoading && <div className="modal-disposal-empty">Loading suggestions...</div>}
+            {!disposalLoading && disposalError && (
+              <div className="modal-disposal-empty">{disposalError}</div>
+            )}
+            {!disposalLoading && !disposalError && disposalSites.length === 0 && (
+              <div className="modal-disposal-empty">No nearby disposal sites found.</div>
+            )}
+            {!disposalLoading && !disposalError && disposalSites.length > 0 && (
+              <div className="modal-disposal-list">
+                {disposalSites.map((site) => (
+                  <div key={site.site_id} className="modal-disposal-item">
+                    <div className="modal-disposal-name">{site.name}</div>
+                    <div className="modal-disposal-meta">
+                      {site.site_type.replace(/_/g, ' ')} · {Number(site.distance_km || 0).toFixed(2)} km · {site.hours}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -334,9 +356,54 @@ function Dashboard() {
   const [route, setRoute] = useState(null);
   const [mapCenter, setMapCenter] = useState([33.8366, -117.9143]);
   const [selectedHotspot, setSelectedHotspot] = useState(null);
+  const [nearbyDisposalSites, setNearbyDisposalSites] = useState([]);
+  const [nearbyDisposalLoading, setNearbyDisposalLoading] = useState(false);
+  const [nearbyDisposalError, setNearbyDisposalError] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
   const [scanError, setScanError] = useState('');
   const [prefetchedRoute, setPrefetchedRoute] = useState(null);
+
+  useEffect(() => {
+    if (!selectedHotspot) {
+      setNearbyDisposalSites([]);
+      setNearbyDisposalLoading(false);
+      setNearbyDisposalError('');
+      return;
+    }
+
+    let cancelled = false;
+    const fetchNearbyDisposalSites = async () => {
+      setNearbyDisposalLoading(true);
+      setNearbyDisposalError('');
+      try {
+        const response = await axios.get('/api/disposal-sites/nearby', {
+          params: {
+            lat: selectedHotspot.lat,
+            lng: selectedHotspot.lng,
+            limit: 3,
+          },
+        });
+        if (!cancelled) {
+          setNearbyDisposalSites(response.data || []);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setNearbyDisposalSites([]);
+          const apiError = error?.response?.data?.error;
+          setNearbyDisposalError(apiError?.message || 'Unable to load disposal site suggestions.');
+        }
+      } finally {
+        if (!cancelled) {
+          setNearbyDisposalLoading(false);
+        }
+      }
+    };
+
+    fetchNearbyDisposalSites();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedHotspot]);
 
   // Active hotspots = all minus skipped
   const activeHotspots = allHotspots.filter(h => !skipped.has(h.id));
@@ -754,7 +821,13 @@ function Dashboard() {
         </div>
       </div>
 
-      <PhotoModal hotspot={selectedHotspot} onClose={() => setSelectedHotspot(null)} />
+      <PhotoModal
+        hotspot={selectedHotspot}
+        onClose={() => setSelectedHotspot(null)}
+        disposalSites={nearbyDisposalSites}
+        disposalLoading={nearbyDisposalLoading}
+        disposalError={nearbyDisposalError}
+      />
     </div>
   );
 }

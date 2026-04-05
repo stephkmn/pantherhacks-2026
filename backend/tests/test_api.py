@@ -184,6 +184,28 @@ class CleanSkyApiTests(unittest.TestCase):
         self.assertIn("estimated_waste_kg", payload[0])
         self.assertIn("cleanup_time_minutes", payload[0])
 
+    def test_nearby_disposal_sites_success(self):
+        response = self.client.get(
+            "/api/disposal-sites/nearby",
+            params={"lat": 33.84, "lng": -117.95, "limit": 3},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertGreaterEqual(len(payload), 1)
+        self.assertLessEqual(len(payload), 3)
+        self.assertIn("site_id", payload[0])
+        self.assertIn("name", payload[0])
+        self.assertIn("distance_km", payload[0])
+
+    def test_nearby_disposal_sites_invalid_lat(self):
+        response = self.client.get(
+            "/api/disposal-sites/nearby",
+            params={"lat": 91, "lng": -117.95, "limit": 3},
+        )
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertEqual(payload["error"]["code"], "INVALID_LAT")
+
     def test_ingest_auth_rejected_when_missing_token(self):
         response = self.client.post("/api/rounds/start", json={"drone_round_id": "round_noauth"})
         self.assertEqual(response.status_code, 401)

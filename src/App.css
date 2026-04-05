@@ -750,6 +750,50 @@ html {
   color: #ff6b6b;
 }
 
+.modal-disposal {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.modal-disposal-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.modal-disposal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-disposal-item {
+  background: var(--dark3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.modal-disposal-name {
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.modal-disposal-meta {
+  color: var(--muted);
+  font-size: 0.72rem;
+  margin-top: 2px;
+}
+
+.modal-disposal-empty {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
 /* ── Start picker bar ────────────────────────────────────────────────────── */
 .start-picker-bar {
   display: flex;

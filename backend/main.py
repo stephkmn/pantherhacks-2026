@@ -14,14 +14,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from data_store import (
+from backend.data_store import (
     DEFAULT_RADIUS_KM,
     MAX_RADIUS_KM,
     compute_cleanup_time_minutes,
     compute_estimated_waste_kg,
     get_data_store,
 )
-from yolo_integration import detect_trash_yolo_from_bytes
+from backend.yolo_integration import detect_trash_yolo_from_bytes
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 
@@ -161,6 +161,17 @@ class ZipHotspotResponse(BaseModel):
     cleanup_time_minutes: int = Field(ge=0)
     last_detected_at: datetime
     photo_url: str | None = None
+
+
+class DisposalSiteResponse(BaseModel):
+    site_id: str
+    name: str
+    lat: float
+    lng: float
+    site_type: str
+    accepted_types: list[str]
+    hours: str
+    distance_km: float
 
 
 def _data_store():
@@ -357,6 +368,46 @@ async def get_hotspots(zip: str, radius_km: float = DEFAULT_RADIUS_KM):
             photo_url=item.get("photo_url"),
         )
         for item in hotspots
+    ]
+
+
+@app.get("/api/disposal-sites/nearby", response_model=list[DisposalSiteResponse])
+async def get_nearby_disposal_sites(lat: float, lng: float, limit: int = 3):
+    if lat < -90 or lat > 90:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_LAT", "message": "lat must be between -90 and 90."},
+        )
+    if lng < -180 or lng > 180:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_LNG", "message": "lng must be between -180 and 180."},
+        )
+    if limit < 1 or limit > 10:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_LIMIT", "message": "limit must be between 1 and 10."},
+        )
+
+    try:
+        sites = _data_store().get_nearby_disposal_sites(lat=lat, lng=lng, limit=limit)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "DATA_STORE_ERROR", "message": str(exc)},
+        ) from exc
+    return [
+        DisposalSiteResponse(
+            site_id=str(site["site_id"]),
+            name=str(site["name"]),
+            lat=float(site["lat"]),
+            lng=float(site["lng"]),
+            site_type=str(site["site_type"]),
+            accepted_types=[str(item) for item in (site.get("accepted_types") or [])],
+            hours=str(site.get("hours") or "Hours unavailable"),
+            distance_km=round(float(site.get("distance_km", 0.0)), 2),
+        )
+        for site in sites
     ]
 
 # Simulated trash detection (replace with real YOLO/Roboflow later)
@@ -659,6 +710,7 @@ async def root():
             "drone_position": "/api/drone-position",
             "trash_entry": "/api/trash-entry",
             "hotspots": "/api/hotspots?zip=92801&radius_km=2.0",
+            "disposal_sites_nearby": "/api/disposal-sites/nearby?lat=33.84&lng=-117.95&limit=3",
             "scan": "/api/scan",
             "optimize_route": "/api/optimize-route",
             "detect_image": "/api/detect-image",
