@@ -49,6 +49,9 @@ function HotspotImage({ hotspot, alt, className, style }) {
     />
   );
 }
+
+const formatKg = (value) => Number(value || 0).toFixed(2);
+const formatMinutes = (value) => Math.round(Number(value || 0));
 // ── Nearest-neighbor route builder ───────────────────────────────────────────
 // Haversine distance in km between two [lat,lng] points
 function haversine([lat1, lng1], [lat2, lng2]) {
@@ -102,8 +105,8 @@ function buildNearestNeighborRoute(hotspots) {
     ordered,
     route_coordinates: ordered.map(h => [h.lat, h.lng]),
     total_distance_km: +totalDist.toFixed(2),
-    total_time_minutes: ordered.reduce((s, h) => s + h.cleanup_time_minutes, 0),
-    total_waste_kg: ordered.reduce((s, h) => s + h.estimated_waste_kg, 0),
+    total_time_minutes: Math.round(ordered.reduce((s, h) => s + h.cleanup_time_minutes, 0)),
+    total_waste_kg: Number(ordered.reduce((s, h) => s + h.estimated_waste_kg, 0).toFixed(2)),
   };
 }
 
@@ -258,11 +261,11 @@ function PhotoModal({ hotspot, onClose }) {
           <div className="modal-stats">
             <div className="modal-stat">
               <span className="mstat-label">Waste Est.</span>
-              <span className="mstat-value">{hotspot.estimated_waste_kg} kg</span>
+              <span className="mstat-value">{formatKg(hotspot.estimated_waste_kg)} kg</span>
             </div>
             <div className="modal-stat">
               <span className="mstat-label">Cleanup</span>
-              <span className="mstat-value">{hotspot.cleanup_time_minutes} min</span>
+              <span className="mstat-value">{formatMinutes(hotspot.cleanup_time_minutes)} min</span>
             </div>
           </div>
           <div className="modal-types">
@@ -304,8 +307,8 @@ function buildRouteFromStart(startLatLng, hotspots) {
     ordered,
     route_coordinates: [startLatLng, ...ordered.map(h => [h.lat, h.lng])],
     total_distance_km: +totalDist.toFixed(2),
-    total_time_minutes: ordered.reduce((s, h) => s + h.cleanup_time_minutes, 0),
-    total_waste_kg: ordered.reduce((s, h) => s + h.estimated_waste_kg, 0),
+    total_time_minutes: Math.round(ordered.reduce((s, h) => s + h.cleanup_time_minutes, 0)),
+    total_waste_kg: Number(ordered.reduce((s, h) => s + h.estimated_waste_kg, 0).toFixed(2)),
   };
 }
 
@@ -539,7 +542,7 @@ function Dashboard() {
                       <div style={{ fontFamily: 'monospace', fontSize: 13 }}>
                         <strong>{h.name}</strong><br />
                         <span style={{ color: getSeverityColor(h.severity) }}>● {h.severity.toUpperCase()}</span><br />
-                        {h.estimated_waste_kg} kg · {h.cleanup_time_minutes} min<br />
+                        {formatKg(h.estimated_waste_kg)} kg · {formatMinutes(h.cleanup_time_minutes)} min<br />
                         <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                           <button onClick={() => setSelectedHotspot(h)}
                             style={{ padding: '4px 10px', background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
@@ -627,11 +630,11 @@ function Dashboard() {
                 <div className="stat-lbl">Active Stops</div>
               </div>
               <div className="stat-box">
-                <div className="stat-num">{activeHotspots.reduce((s,h)=>s+h.estimated_waste_kg,0)}<small>kg</small></div>
+                <div className="stat-num">{formatKg(activeHotspots.reduce((s,h)=>s+h.estimated_waste_kg,0))}<small>kg</small></div>
                 <div className="stat-lbl">Est. Waste</div>
               </div>
               <div className="stat-box">
-                <div className="stat-num">{activeHotspots.reduce((s,h)=>s+h.cleanup_time_minutes,0)}<small>m</small></div>
+                <div className="stat-num">{formatMinutes(activeHotspots.reduce((s,h)=>s+h.cleanup_time_minutes,0))}<small>m</small></div>
                 <div className="stat-lbl">Cleanup Time</div>
               </div>
               {displayRoute && (
@@ -674,8 +677,8 @@ function Dashboard() {
                       </div>
                     </div>
                     <div className="hspot-meta">
-                      <span>⚖️ {h.estimated_waste_kg} kg</span>
-                      <span>⏱ {h.cleanup_time_minutes} min</span>
+                      <span>⚖️ {formatKg(h.estimated_waste_kg)} kg</span>
+                      <span>⏱ {formatMinutes(h.cleanup_time_minutes)} min</span>
                     </div>
                     <div className="hspot-types">
                       {h.waste_types.map(t => <span key={t} className="wtype">{t}</span>)}
@@ -705,13 +708,13 @@ function Dashboard() {
                   <div className="rstep-num" style={{ background: getSeverityColor(h.severity) }}>{i + 1}</div>
                   <div style={{ flex: 1 }}>
                     <div className="rstep-name">{h.name}</div>
-                    <div className="rstep-meta">{h.estimated_waste_kg} kg · {h.cleanup_time_minutes} min</div>
+                    <div className="rstep-meta">{formatKg(h.estimated_waste_kg)} kg · {formatMinutes(h.cleanup_time_minutes)} min</div>
                   </div>
                   <button className="rstep-skip" onClick={(e) => toggleSkip(h.id, e)} title="Skip this stop">✕</button>
                 </div>
               ))}
               <div className="route-summary-pill">
-                {displayRoute.total_distance_km} km · {displayRoute.total_time_minutes} min · {displayRoute.total_waste_kg} kg total
+                {displayRoute.total_distance_km} km · {formatMinutes(displayRoute.total_time_minutes)} min · {formatKg(displayRoute.total_waste_kg)} kg total
               </div>
             </div>
           )}
