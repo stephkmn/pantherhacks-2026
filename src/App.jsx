@@ -5,39 +5,6 @@ import 'leaflet/dist/leaflet.css';
 
 // ── Mock data ─────────────────────────────────────────────────────────────────
 const PLACEHOLDER_PHOTO = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='360' height='220'><rect width='100%25' height='100%25' fill='%231f2937'/><text x='50%25' y='46%25' fill='%23e5e7eb' font-size='18' text-anchor='middle' font-family='Arial'>Garbage Photo</text><text x='50%25' y='58%25' fill='%239ca3af' font-size='13' text-anchor='middle' font-family='Arial'>Placeholder</text></svg>";
-const MOCK_HOTSPOTS = [
-  {
-    id: 1, lat: 33.837, lng: -117.915, severity: 'high',
-    name: 'Harbor Blvd Intersection', estimated_waste_kg: 18,
-    cleanup_time_minutes: 20, waste_types: ['Plastic Bags', 'Fast Food', 'Bottles'],
-    photo: 'https://images.unsplash.com/photo-1604187351574-c75ca79f5807?w=400&q=80'
-  },
-  {
-    id: 2, lat: 33.835, lng: -117.913, severity: 'high',
-    name: 'Ball Rd & State College', estimated_waste_kg: 14,
-    cleanup_time_minutes: 18, waste_types: ['Cardboard', 'Cans'],
-    photo: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400&q=80'
-  },
-  {
-    id: 3, lat: 33.839, lng: -117.918, severity: 'medium',
-    name: 'Anaheim Plaza Lot', estimated_waste_kg: 7,
-    cleanup_time_minutes: 12, waste_types: ['Paper', 'Styrofoam'],
-    photo: 'https://images.unsplash.com/photo-1530587191325-3db32d826c18?w=400&q=80'
-  },
-  {
-    id: 4, lat: 33.833, lng: -117.911, severity: 'medium',
-    name: 'Euclid St Corridor', estimated_waste_kg: 5,
-    cleanup_time_minutes: 10, waste_types: ['Mixed Waste'],
-    photo: 'https://images.unsplash.com/photo-1567613387979-af56736a89c6?w=400&q=80'
-  },
-  {
-    id: 5, lat: 33.841, lng: -117.916, severity: 'low',
-    name: 'Brookhurst Community Park', estimated_waste_kg: 2,
-    cleanup_time_minutes: 5, waste_types: ['Organic', 'Paper'],
-    photo: 'https://images.unsplash.com/photo-1573408301185-9519f94816b5?w=400&q=80'
-  },
-];
-
 // ── Nearest-neighbor route builder ───────────────────────────────────────────
 // Haversine distance in km between two [lat,lng] points
 function haversine([lat1, lng1], [lat2, lng2]) {
@@ -343,8 +310,8 @@ function Dashboard() {
         lng: hotspot.lng,
         severity: colorToSeverity(hotspot.color),
         name: `ZIP ${zip} Hotspot #${idx + 1}`,
-        estimated_waste_kg: Number((hotspot.total_size * 0.2).toFixed(1)),
-        cleanup_time_minutes: Math.max(5, hotspot.pile_count * 4),
+        estimated_waste_kg: Number(hotspot.estimated_waste_kg || 0),
+        cleanup_time_minutes: Number(hotspot.cleanup_time_minutes || 0),
         waste_types: [
           `${hotspot.pile_count} pile${hotspot.pile_count === 1 ? '' : 's'}`,
           `Avg size ${hotspot.avg_size}/10`,
@@ -369,8 +336,12 @@ function Dashboard() {
       setScanDone(false);
       setAllHotspots([]);
       setPrefetchedRoute(null);
-      const apiMessage = error?.response?.data?.error?.message;
-      setScanError(apiMessage || 'Unable to fetch hotspots. Confirm backend is running and ZIP is seeded.');
+      const apiError = error?.response?.data?.error;
+      if (apiError?.code === 'ZIP_NOT_FOUND') {
+        setScanError(`${apiError.message} Try an Orange County ZIP like 92801, 92802, 92804, 92704, or 92683.`);
+      } else {
+        setScanError(apiError?.message || 'Unable to fetch hotspots. Confirm backend is running and ZIP is seeded.');
+      }
     }
   };
 

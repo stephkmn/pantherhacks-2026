@@ -1,12 +1,14 @@
-from datetime import datetime
+import asyncio
+from datetime import datetime, timedelta, timezone
 from enum import Enum
+import os
 from pathlib import Path
 import random
 from typing import Any
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -15,6 +17,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.data_store import (
     DEFAULT_RADIUS_KM,
     MAX_RADIUS_KM,
+    compute_cleanup_time_minutes,
+    compute_estimated_waste_kg,
     get_data_store,
 )
 from backend.yolo_integration import detect_trash_yolo_from_bytes
@@ -82,6 +86,8 @@ class DetectImageResponse(BaseModel):
     average_confidence: float = Field(ge=0, le=1)
     image_size: list[int] = Field(min_length=2, max_length=2)
     estimated_waste_kg: float = Field(ge=0)
+    photo_url: str | None = None
+    persisted_entries: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ErrorEnvelope(BaseModel):
@@ -151,12 +157,78 @@ class ZipHotspotResponse(BaseModel):
     total_size: int
     score: float
     color: HotspotColor
+    estimated_waste_kg: float = Field(ge=0)
+    cleanup_time_minutes: int = Field(ge=0)
     last_detected_at: datetime
     photo_url: str | None = None
 
 
 def _data_store():
     return get_data_store()
+
+
+INGEST_API_KEY = os.getenv("INGEST_API_KEY", "dev-ingest-key")
+ENABLE_HOURLY_ROUND_AUTOMATION = os.getenv("ENABLE_HOURLY_ROUND_AUTOMATION", "false").lower() == "true"
+AUTO_ROUND_PREFIX = os.getenv("AUTO_ROUND_PREFIX", "auto_round")
+_hourly_round_task: asyncio.Task | None = None
+
+
+def _extract_ingest_token(
+    authorization: str | None,
+    x_api_key: str | None,
+) -> str | None:
+    if x_api_key:
+        return x_api_key.strip()
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return None
+
+
+def require_ingest_auth(
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> None:
+    provided_token = _extract_ingest_token(authorization=authorization, x_api_key=x_api_key)
+    if not provided_token:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "UNAUTHORIZED",
+                "message": "Missing ingest token. Provide Bearer token or X-API-Key.",
+            },
+        )
+    if provided_token != INGEST_API_KEY:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "FORBIDDEN",
+                "message": "Invalid ingest token.",
+            },
+        )
+
+
+def _seconds_until_next_hour() -> float:
+    now = datetime.now(timezone.utc)
+    next_hour = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
+    return max(1.0, (next_hour - now).total_seconds())
+
+
+async def _hourly_round_worker() -> None:
+    while True:
+        await asyncio.sleep(_seconds_until_next_hour())
+        round_id = f"{AUTO_ROUND_PREFIX}_{datetime.now(timezone.utc).strftime('%Y%m%d%H00')}_{uuid4().hex[:6]}"
+        _data_store().start_new_round(round_id=round_id)
+
+
+def _size_from_bbox(bbox: list[float], image_size: list[int]) -> int:
+    width, height = image_size
+    if width <= 0 or height <= 0:
+        return 1
+    x1, y1, x2, y2 = bbox
+    bbox_width = max(0.0, x2 - x1)
+    bbox_height = max(0.0, y2 - y1)
+    area_ratio = (bbox_width * bbox_height) / float(width * height)
+    return min(10, max(1, int(round(area_ratio * 20)) or 1))
 
 
 @app.exception_handler(RequestValidationError)
@@ -183,7 +255,7 @@ async def http_exception_handler(_, exc: HTTPException):
     return JSONResponse(status_code=exc.status_code, content={"error": error})
 
 
-@app.post("/api/rounds/start", response_model=RoundResponse)
+@app.post("/api/rounds/start", response_model=RoundResponse, dependencies=[Depends(require_ingest_auth)])
 async def start_round(payload: RoundStartRequest):
     round_id = payload.drone_round_id or f"round_{uuid4().hex[:12]}"
     round_model = _data_store().start_new_round(round_id=round_id)
@@ -195,7 +267,7 @@ async def start_round(payload: RoundStartRequest):
     )
 
 
-@app.post("/api/drone-position", response_model=DronePositionResponse)
+@app.post("/api/drone-position", response_model=DronePositionResponse, dependencies=[Depends(require_ingest_auth)])
 async def upsert_drone_position(payload: DronePositionUpsertRequest):
     record = _data_store().upsert_drone_position(
         round_id=payload.round_id,
@@ -213,7 +285,7 @@ async def upsert_drone_position(payload: DronePositionUpsertRequest):
     )
 
 
-@app.post("/api/trash-entry", response_model=TrashEntryResponse)
+@app.post("/api/trash-entry", response_model=TrashEntryResponse, dependencies=[Depends(require_ingest_auth)])
 async def create_trash_entry(payload: TrashEntryCreateRequest):
     record = _data_store().insert_trash_entry(
         round_id=payload.round_id,
@@ -279,6 +351,8 @@ async def get_hotspots(zip: str, radius_km: float = DEFAULT_RADIUS_KM):
             total_size=item["total_size"],
             score=item["score"],
             color=item["color"],
+            estimated_waste_kg=float(item.get("estimated_waste_kg", compute_estimated_waste_kg(item["total_size"]))),
+            cleanup_time_minutes=int(item.get("cleanup_time_minutes", compute_cleanup_time_minutes(item["pile_count"]))),
             last_detected_at=datetime.fromisoformat(item["last_detected_at"]),
             photo_url=item.get("photo_url"),
         )
@@ -425,6 +499,7 @@ async def optimize_cleanup_route(hotspots: list[TrashHotspot]):
 @app.post(
     "/api/detect-image",
     response_model=DetectImageResponse,
+    dependencies=[Depends(require_ingest_auth)],
     responses={
         400: {
             "model": ErrorEnvelope,
@@ -432,7 +507,14 @@ async def optimize_cleanup_route(hotspots: list[TrashHotspot]):
         }
     },
 )
-async def detect_trash_in_image(file: UploadFile = File(...)):
+async def detect_trash_in_image(
+    file: UploadFile = File(...),
+    round_id: str | None = Form(default=None),
+    drone_id: str | None = Form(default=None),
+    lat: float | None = Form(default=None),
+    lng: float | None = Form(default=None),
+    detected_at: datetime | None = Form(default=None),
+):
     """
     Endpoint for actual image-based trash detection
     TODO: Integrate YOLO or Roboflow model here
@@ -468,7 +550,68 @@ async def detect_trash_in_image(file: UploadFile = File(...)):
         for det in yolo_result["detections"]
     ]
     yolo_result["detections"] = mapped_detections
+
+    ingest_fields = [round_id, drone_id, lat, lng]
+    if any(value is not None for value in ingest_fields) and not all(value is not None for value in ingest_fields):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "MISSING_INGEST_FIELDS",
+                "message": "round_id, drone_id, lat, and lng are all required to persist detections.",
+            },
+        )
+
+    photo_url: str | None = None
+    persisted_entries: list[dict[str, Any]] = []
+    if all(value is not None for value in ingest_fields):
+        photo_url = _data_store().upload_detection_image(contents, file.filename or "uploaded-image")
+        record_time = detected_at or datetime.now(timezone.utc)
+        for det in mapped_detections:
+            entry = _data_store().insert_trash_entry(
+                round_id=round_id,
+                drone_id=drone_id,
+                lat=float(lat),
+                lng=float(lng),
+                size=_size_from_bbox(det["bbox"], yolo_result["image_size"]),
+                detected_at=record_time,
+                meta={
+                    "detection": det,
+                    "photo_url": photo_url,
+                    "source": "detect-image",
+                    "filename": file.filename,
+                },
+            )
+            persisted_entries.append(
+                {
+                    "id": entry.id,
+                    "round_id": entry.round_id,
+                    "drone_id": entry.drone_id,
+                    "detected_at": entry.detected_at.isoformat(),
+                    "lat": entry.lat,
+                    "lng": entry.lng,
+                    "size": entry.size,
+                    "meta": entry.meta,
+                }
+            )
+
+    yolo_result["photo_url"] = photo_url
+    yolo_result["persisted_entries"] = persisted_entries
     return yolo_result
+
+
+@app.on_event("startup")
+async def startup_event():
+    global _hourly_round_task
+    if ENABLE_HOURLY_ROUND_AUTOMATION and _hourly_round_task is None:
+        _hourly_round_task = asyncio.create_task(_hourly_round_worker())
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    global _hourly_round_task
+    if _hourly_round_task:
+        _hourly_round_task.cancel()
+        _hourly_round_task = None
 
 
 def calculate_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
