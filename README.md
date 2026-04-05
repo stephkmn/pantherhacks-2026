@@ -15,6 +15,7 @@ Optional:
 - `YOLO_MODEL_PATH`
 - `ENABLE_HOURLY_ROUND_AUTOMATION`
 - `AUTO_ROUND_PREFIX`
+- `VITE_GOOGLE_MAPS_API_KEY` (optional, for higher-reliability Street View images in frontend)
 
 ### Dev vs Prod
 - Dev: set `ENABLE_HOURLY_ROUND_AUTOMATION=false`
@@ -44,6 +45,7 @@ Protected endpoints:
 1. Apply SQL migration and seed data:
 - `backend/supabase/migrations/001_hourly_drone_trash.sql`
 - `backend/supabase/seeds/seed_orange_county_zip_centroids.sql`
+- `backend/supabase/seeds/seed_bay_area_zip_centroids.sql`
 - `backend/supabase/seeds/seed_trash_entries_from_zip_centroids.sql`
 
 2. Start app:

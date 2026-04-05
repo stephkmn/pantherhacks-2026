@@ -5,6 +5,50 @@ import 'leaflet/dist/leaflet.css';
 
 // ── Mock data ─────────────────────────────────────────────────────────────────
 const PLACEHOLDER_PHOTO = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='360' height='220'><rect width='100%25' height='100%25' fill='%231f2937'/><text x='50%25' y='46%25' fill='%23e5e7eb' font-size='18' text-anchor='middle' font-family='Arial'>Garbage Photo</text><text x='50%25' y='58%25' fill='%239ca3af' font-size='13' text-anchor='middle' font-family='Arial'>Placeholder</text></svg>";
+
+function buildStreetViewUrl(lat, lng) {
+  const params = new URLSearchParams({
+    size: '640x360',
+    location: `${lat},${lng}`,
+    fov: '90',
+    heading: '0',
+    pitch: '0',
+  });
+  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  if (apiKey) {
+    params.set('key', apiKey);
+  }
+  return `https://maps.googleapis.com/maps/api/streetview?${params.toString()}`;
+}
+
+function buildStaticMapUrl(lat, lng) {
+  const params = new URLSearchParams({
+    center: `${lat},${lng}`,
+    zoom: '16',
+    size: '640x360',
+    markers: `${lat},${lng},red-pushpin`,
+  });
+  return `https://staticmap.openstreetmap.de/staticmap.php?${params.toString()}`;
+}
+
+function HotspotImage({ hotspot, alt, className, style }) {
+  const sources = [hotspot.photo, hotspot.map_preview, PLACEHOLDER_PHOTO].filter(Boolean);
+  const [sourceIdx, setSourceIdx] = useState(0);
+
+  useEffect(() => {
+    setSourceIdx(0);
+  }, [hotspot.id, hotspot.photo, hotspot.map_preview]);
+
+  return (
+    <img
+      src={sources[Math.min(sourceIdx, sources.length - 1)]}
+      alt={alt}
+      className={className}
+      style={style}
+      onError={() => setSourceIdx((prev) => Math.min(prev + 1, sources.length - 1))}
+    />
+  );
+}
 // ── Nearest-neighbor route builder ───────────────────────────────────────────
 // Haversine distance in km between two [lat,lng] points
 function haversine([lat1, lng1], [lat2, lng2]) {
@@ -225,7 +269,7 @@ function PhotoModal({ hotspot, onClose }) {
         <div className="modal-severity" style={{ background: getSeverityColor(hotspot.severity) }}>
           {hotspot.severity.toUpperCase()} PRIORITY
         </div>
-        <img src={hotspot.photo} alt="Trash site" className="modal-photo" />
+        <HotspotImage hotspot={hotspot} alt="Trash site" className="modal-photo" />
         <div className="modal-info">
           <h3>{hotspot.name}</h3>
           <div className="modal-stats">
@@ -347,7 +391,8 @@ function Dashboard() {
           `Score ${hotspot.score}`,
         ],
         detected_at: hotspot.last_detected_at,
-        photo: hotspot.photo_url || PLACEHOLDER_PHOTO,
+        photo: buildStreetViewUrl(hotspot.lat, hotspot.lng),
+        map_preview: buildStaticMapUrl(hotspot.lat, hotspot.lng),
       }));
       setAllHotspots(scanned);
 
@@ -500,8 +545,8 @@ function Dashboard() {
                   >
                     <Tooltip direction="top" offset={[0, -8]} opacity={1}>
                       <div style={{ width: 170 }}>
-                        <img
-                          src={h.photo || PLACEHOLDER_PHOTO}
+                        <HotspotImage
+                          hotspot={h}
                           alt="Trash placeholder"
                           style={{ width: '100%', borderRadius: 6, display: 'block' }}
                         />

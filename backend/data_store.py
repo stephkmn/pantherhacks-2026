@@ -36,13 +36,17 @@ ZIP_CENTROIDS = {
 
 
 def _load_zip_centroids_from_seed_sql() -> dict[str, tuple[float, float]]:
-    seed_path = Path(__file__).resolve().parent / "supabase" / "seeds" / "seed_orange_county_zip_centroids.sql"
-    if not seed_path.exists():
+    seeds_dir = Path(__file__).resolve().parent / "supabase" / "seeds"
+    if not seeds_dir.exists():
         return {}
 
-    content = seed_path.read_text(encoding="utf-8")
-    matches = re.findall(r"\('(\d{5})',\s*([-\d.]+),\s*([-\d.]+)\)", content)
-    return {zip_code: (float(lat), float(lng)) for zip_code, lat, lng in matches}
+    rows: dict[str, tuple[float, float]] = {}
+    for seed_path in sorted(seeds_dir.glob("seed_*_zip_centroids.sql")):
+        content = seed_path.read_text(encoding="utf-8")
+        matches = re.findall(r"\('(\d{5})',\s*([-\d.]+),\s*([-\d.]+)\)", content)
+        for zip_code, lat, lng in matches:
+            rows[zip_code] = (float(lat), float(lng))
+    return rows
 
 
 ZIP_CENTROIDS.update(_load_zip_centroids_from_seed_sql())
