@@ -7,6 +7,9 @@ from PIL import Image
 from backend.data_store import reset_data_store_for_tests
 from backend.main import app
 
+INGEST_HEADERS = {"X-API-Key": "dev-ingest-key"}
+
+
 class CleanSkyApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -82,6 +85,7 @@ class CleanSkyApiTests(unittest.TestCase):
         response = self.client.post(
             "/api/detect-image",
             files={"file": ("sample.png", bytes_buffer, "image/png")},
+            headers=INGEST_HEADERS,
         )
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -95,13 +99,14 @@ class CleanSkyApiTests(unittest.TestCase):
         response = self.client.post(
             "/api/detect-image",
             files={"file": ("sample.txt", io.BytesIO(b"not-an-image"), "text/plain")},
+            headers=INGEST_HEADERS,
         )
         self.assertEqual(response.status_code, 400)
         payload = response.json()
         self.assertEqual(payload["error"]["code"], "INVALID_CONTENT_TYPE")
 
     def test_round_rollover_clears_positions_and_keeps_trash_history(self):
-        first_round = self.client.post("/api/rounds/start", json={"drone_round_id": "round_a"})
+        first_round = self.client.post("/api/rounds/start", json={"drone_round_id": "round_a"}, headers=INGEST_HEADERS)
         self.assertEqual(first_round.status_code, 200)
         self.client.post(
             "/api/drone-position",
@@ -111,6 +116,7 @@ class CleanSkyApiTests(unittest.TestCase):
                 "lat": 33.84,
                 "lng": -117.95,
             },
+            headers=INGEST_HEADERS,
         )
         self.client.post(
             "/api/trash-entry",
@@ -121,9 +127,10 @@ class CleanSkyApiTests(unittest.TestCase):
                 "lng": -117.9539,
                 "size": 5,
             },
+            headers=INGEST_HEADERS,
         )
 
-        second_round = self.client.post("/api/rounds/start", json={"drone_round_id": "round_b"})
+        second_round = self.client.post("/api/rounds/start", json={"drone_round_id": "round_b"}, headers=INGEST_HEADERS)
         self.assertEqual(second_round.status_code, 200)
 
         hotspots = self.client.get("/api/hotspots", params={"zip": "92801", "radius_km": 2.0})
@@ -132,7 +139,7 @@ class CleanSkyApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(payload), 1)
 
     def test_trash_entry_size_validation(self):
-        self.client.post("/api/rounds/start", json={"drone_round_id": "round_size"})
+        self.client.post("/api/rounds/start", json={"drone_round_id": "round_size"}, headers=INGEST_HEADERS)
         response = self.client.post(
             "/api/trash-entry",
             json={
@@ -142,6 +149,7 @@ class CleanSkyApiTests(unittest.TestCase):
                 "lng": -117.95,
                 "size": 11,
             },
+            headers=INGEST_HEADERS,
         )
         self.assertEqual(response.status_code, 422)
 
@@ -152,7 +160,7 @@ class CleanSkyApiTests(unittest.TestCase):
         self.assertEqual(payload["error"]["code"], "ZIP_NOT_FOUND")
 
     def test_hotspots_color_scoring(self):
-        self.client.post("/api/rounds/start", json={"drone_round_id": "round_score"})
+        self.client.post("/api/rounds/start", json={"drone_round_id": "round_score"}, headers=INGEST_HEADERS)
         for size in [1, 2, 10, 10, 10]:
             self.client.post(
                 "/api/trash-entry",
@@ -163,6 +171,7 @@ class CleanSkyApiTests(unittest.TestCase):
                     "lng": -117.9539,
                     "size": size,
                 },
+                headers=INGEST_HEADERS,
             )
 
         response = self.client.get("/api/hotspots", params={"zip": "92801", "radius_km": 2.0})
@@ -171,6 +180,13 @@ class CleanSkyApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(payload), 1)
         self.assertIn(payload[0]["color"], ["green", "yellow", "red"])
         self.assertGreater(payload[0]["score"], 0)
+        self.assertIn("estimated_waste_kg", payload[0])
+        self.assertIn("cleanup_time_minutes", payload[0])
+
+    def test_ingest_auth_rejected_when_missing_token(self):
+        response = self.client.post("/api/rounds/start", json={"drone_round_id": "round_noauth"})
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"]["code"], "UNAUTHORIZED")
 
 
 if __name__ == "__main__":

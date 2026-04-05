@@ -4,9 +4,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import math
+import mimetypes
 import os
+from pathlib import Path
+import re
 from typing import Any, Protocol
 from urllib import error, request
+from urllib.parse import quote
+from uuid import uuid4
 
 
 SCORE_PILE_WEIGHT = 1.0
@@ -16,6 +21,9 @@ YELLOW_THRESHOLD = 35.0
 
 DEFAULT_RADIUS_KM = 2.0
 MAX_RADIUS_KM = 20.0
+WASTE_KG_PER_SIZE_POINT = 0.2
+CLEANUP_MIN_PER_PILE = 4
+MIN_CLEANUP_MINUTES = 5
 
 # In-memory fallback ZIP centroids for local development/tests.
 ZIP_CENTROIDS = {
@@ -25,6 +33,19 @@ ZIP_CENTROIDS = {
     "10001": (40.7506, -73.9972),
     "94103": (37.7725, -122.4091),
 }
+
+
+def _load_zip_centroids_from_seed_sql() -> dict[str, tuple[float, float]]:
+    seed_path = Path(__file__).resolve().parent / "supabase" / "seeds" / "seed_orange_county_zip_centroids.sql"
+    if not seed_path.exists():
+        return {}
+
+    content = seed_path.read_text(encoding="utf-8")
+    matches = re.findall(r"\('(\d{5})',\s*([-\d.]+),\s*([-\d.]+)\)", content)
+    return {zip_code: (float(lat), float(lng)) for zip_code, lat, lng in matches}
+
+
+ZIP_CENTROIDS.update(_load_zip_centroids_from_seed_sql())
 
 
 def utc_now() -> datetime:
@@ -41,6 +62,14 @@ def score_to_color(score: float) -> str:
 
 def compute_score(pile_count: int, total_size: int) -> float:
     return round((pile_count * SCORE_PILE_WEIGHT) + (total_size * SCORE_SIZE_WEIGHT), 2)
+
+
+def compute_estimated_waste_kg(total_size: int) -> float:
+    return round(total_size * WASTE_KG_PER_SIZE_POINT, 1)
+
+
+def compute_cleanup_time_minutes(pile_count: int) -> int:
+    return max(MIN_CLEANUP_MINUTES, pile_count * CLEANUP_MIN_PER_PILE)
 
 
 def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -109,6 +138,9 @@ class DataStore(Protocol):
         ...
 
     def get_hotspots_by_zip(self, zip_code: str, radius_km: float) -> list[dict[str, Any]]:
+        ...
+
+    def upload_detection_image(self, image_bytes: bytes, filename: str) -> str | None:
         ...
 
 
@@ -219,6 +251,8 @@ class InMemoryDataStore:
                     "total_size": total_size,
                     "score": score,
                     "color": score_to_color(score),
+                    "estimated_waste_kg": compute_estimated_waste_kg(total_size),
+                    "cleanup_time_minutes": compute_cleanup_time_minutes(pile_count),
                     "last_detected_at": latest_at.isoformat(),
                     "photo_url": next(
                         (
@@ -236,6 +270,9 @@ class InMemoryDataStore:
             )
         results.sort(key=lambda item: item["score"], reverse=True)
         return results
+
+    def upload_detection_image(self, image_bytes: bytes, filename: str) -> str | None:
+        return None
 
 
 class SupabaseDataStore:
@@ -259,6 +296,52 @@ class SupabaseDataStore:
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8")
             raise RuntimeError(f"Supabase RPC {function_name} failed: {detail}") from exc
+
+    def upload_detection_image(self, image_bytes: bytes, filename: str) -> str | None:
+        bucket = os.getenv("SUPABASE_STORAGE_BUCKET", "drone-images")
+        safe_filename = "".join(ch if ch.isalnum() or ch in {".", "_", "-"} else "_" for ch in filename)
+        object_path = f"detections/{utc_now().strftime('%Y/%m/%d')}/{uuid4().hex}_{safe_filename}"
+        mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+        upload_url = f"{self.base_url}/storage/v1/object/{bucket}/{quote(object_path, safe='/')}"
+        upload_headers = {
+            "apikey": self.service_role_key,
+            "Authorization": f"Bearer {self.service_role_key}",
+            "Content-Type": mime_type,
+            "x-upsert": "true",
+        }
+        upload_req = request.Request(upload_url, data=image_bytes, headers=upload_headers, method="POST")
+        try:
+            with request.urlopen(upload_req, timeout=30):
+                pass
+        except error.HTTPError as exc:
+            detail = exc.read().decode("utf-8")
+            raise RuntimeError(f"Supabase storage upload failed: {detail}") from exc
+
+        signed_ttl_seconds = int(os.getenv("SUPABASE_STORAGE_SIGNED_URL_TTL_SECONDS", "0"))
+        if signed_ttl_seconds > 0:
+            sign_url = f"{self.base_url}/storage/v1/object/sign/{bucket}"
+            sign_payload = json.dumps({"paths": [object_path], "expiresIn": signed_ttl_seconds}).encode("utf-8")
+            sign_headers = {
+                "apikey": self.service_role_key,
+                "Authorization": f"Bearer {self.service_role_key}",
+                "Content-Type": "application/json",
+            }
+            sign_req = request.Request(sign_url, data=sign_payload, headers=sign_headers, method="POST")
+            try:
+                with request.urlopen(sign_req, timeout=30) as response:
+                    signed = json.loads(response.read().decode("utf-8"))
+                    first = signed[0] if isinstance(signed, list) and signed else signed
+                    signed_url = first.get("signedURL") if isinstance(first, dict) else None
+                    if signed_url:
+                        if signed_url.startswith("http://") or signed_url.startswith("https://"):
+                            return signed_url
+                        return f"{self.base_url}/storage/v1{signed_url}"
+            except error.HTTPError as exc:
+                detail = exc.read().decode("utf-8")
+                raise RuntimeError(f"Supabase storage sign failed: {detail}") from exc
+
+        return f"{self.base_url}/storage/v1/object/public/{bucket}/{quote(object_path, safe='/')}"
 
     def start_new_round(self, round_id: str | None = None) -> DroneRound:
         payload = self._rpc("start_new_round", {"drone_round_id": round_id})
