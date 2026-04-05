@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { MapContainer, TileLayer, CircleMarker, Circle, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
+// import { MapContainer, TileLayer, CircleMarker, Circle, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import { MapContainer, TileLayer, CircleMarker, Circle, Polyline, Popup, Tooltip, Marker, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-
 // ── Mock data ─────────────────────────────────────────────────────────────────
 const PLACEHOLDER_PHOTO = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='360' height='220'><rect width='100%25' height='100%25' fill='%231f2937'/><text x='50%25' y='46%25' fill='%23e5e7eb' font-size='18' text-anchor='middle' font-family='Arial'>Garbage Photo</text><text x='50%25' y='58%25' fill='%239ca3af' font-size='13' text-anchor='middle' font-family='Arial'>Placeholder</text></svg>";
 
@@ -322,6 +323,7 @@ function MapClickHandler({ enabled, onMapClick }) {
 
 // ── DASHBOARD PAGE ────────────────────────────────────────────────────────────
 function Dashboard() {
+  const [hoverInfo, setHoverInfo] = useState(null); // { h, x, y }
   const [zip, setZip] = useState('');
   const [scanning, setScanning] = useState(false);
   const [scanDone, setScanDone] = useState(false);
@@ -419,8 +421,8 @@ function Dashboard() {
     ? allHotspots
     : allHotspots.filter(h => h.severity === activeFilter);
 
-  const displayRoute = route || prefetchedRoute;
-  const routeStops = route ? route.ordered : (prefetchedRoute?.ordered || prefetchedRoute?.hotspots || []);
+  const displayRoute = route;
+  const routeStops = route ? route.ordered : [];
 
   return (
     <div className="dashboard">
@@ -511,89 +513,65 @@ function Dashboard() {
             <MapClickHandler enabled={pickingStart} onMapClick={handleMapClick} />
 
             {/* Hotspot markers */}
-            {filtered.map(h => {
-              const isSkipped = skipped.has(h.id);
-              const routeIdx = routeStops.findIndex(r => r.id === h.id);
-              return (
-                <React.Fragment key={h.id}>
-                  <CircleMarker
-                    center={[h.lat, h.lng]}
-                    radius={12}
-                    fillColor={isSkipped ? '#444' : getSeverityColor(h.severity)}
-                    color={isSkipped ? '#666' : '#fff'}
-                    weight={2}
-                    fillOpacity={isSkipped ? 0.35 : 0.9}
-                    eventHandlers={{ click: () => !isSkipped && setSelectedHotspot(h) }}
-                  >
-                    <Tooltip direction="top" offset={[0, -8]} opacity={1}>
-                      <div style={{ width: 170 }}>
-                        <HotspotImage
-                          hotspot={h}
-                          alt="Trash placeholder"
-                          style={{ width: '100%', borderRadius: 6, display: 'block' }}
-                        />
-                      </div>
-                    </Tooltip>
-                    <Popup>
-                      <div style={{ fontFamily: 'monospace', fontSize: 13 }}>
-                        <strong>{h.name}</strong><br />
-                        <span style={{ color: getSeverityColor(h.severity) }}>● {h.severity.toUpperCase()}</span><br />
-                        {formatKg(h.estimated_waste_kg)} kg · {formatMinutes(h.cleanup_time_minutes)} min<br />
-                        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                          <button onClick={() => setSelectedHotspot(h)}
-                            style={{ padding: '4px 10px', background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
-                            📸 Photo
-                          </button>
-                          <button onClick={(e) => toggleSkip(h.id, e)}
-                            style={{ padding: '4px 10px', background: isSkipped ? '#22c55e' : '#ff3b3b', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
-                            {isSkipped ? '+ Restore' : '✕ Skip'}
-                          </button>
-                        </div>
-                      </div>
-                    </Popup>
-                  </CircleMarker>
-                  {!isSkipped && (
-                    <Circle
-                      center={[h.lat, h.lng]}
-                      radius={SEV_RADIUS[h.severity]}
-                      fillColor={getSeverityColor(h.severity)}
-                      color={getSeverityColor(h.severity)}
-                      weight={1} opacity={0.4} fillOpacity={0.12}
-                    />
-                  )}
-                </React.Fragment>
-              );
-            })}
+           {filtered.map((h, i) => {
+  const isSkipped = skipped.has(h.id);
+  const routeIdx = routeStops.findIndex(r => r.id === h.id);
+  const stopNum = routeIdx >= 0 ? routeIdx + 1 : i + 1;
+  const color = isSkipped ? '#444' : getSeverityColor(h.severity);
 
-            {/* Route polyline */}
-            {displayRoute && (
-              <Polyline
-                positions={displayRoute.route_coordinates}
-                color="#00e5ff" weight={3} opacity={0.85} dashArray="8,5"
-              />
-            )}
+  const icon = L.divIcon({
+    className: '',
+    html: `<div style="
+      width:28px;height:28px;border-radius:50%;
+      background:${color};border:2px solid white;
+      display:flex;align-items:center;justify-content:center;
+      font-weight:700;font-size:12px;color:white;
+      cursor:pointer;
+    ">${stopNum}</div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  });
 
-            {/* Start pin marker */}
-            {startPin && (
-              <CircleMarker
-                center={startPin}
-                radius={14}
-                fillColor="#ffffff"
-                color="#00e5ff"
-                weight={3}
-                fillOpacity={1}
-              >
-                <Popup>
-                  <div style={{ fontFamily: 'monospace', fontSize: 13, textAlign: 'center' }}>
-                    <strong>📍 Your Start</strong><br />
-                    {activeHotspots.length} stops from here
-                  </div>
-                </Popup>
-              </CircleMarker>
-            )}
-
+  return (
+    <React.Fragment key={h.id}>
+      <Marker
+        position={[h.lat, h.lng]}
+        icon={icon}
+        eventHandlers={{
+          click: () => { if (!isSkipped) setSelectedHotspot(h); },
+          mouseover: (e) => {
+            const { x, y } = e.containerPoint;
+            setHoverInfo({ h, stopNum, x, y });
+          },
+          mouseout: () => setHoverInfo(null),
+        }}
+      />
+      {!isSkipped && (
+        <Circle
+          center={[h.lat, h.lng]}
+          radius={SEV_RADIUS[h.severity]}
+          fillColor={color}
+          color={color}
+          weight={1} opacity={0.4} fillOpacity={0.12}
+        />
+      )}
+    </React.Fragment>
+  );
+})}
             <DroneCanvas active={scanning} />
           </MapContainer>
+          {hoverInfo && (
+  <div className="map-hover-card" style={{
+    left: hoverInfo.x + 16,
+    top: hoverInfo.y - 10,
+  }}>
+    <strong>#{hoverInfo.stopNum} — {hoverInfo.h.name}</strong>
+    <div style={{ color: getSeverityColor(hoverInfo.h.severity), fontSize: 11, marginTop: 3 }}>
+      ● {hoverInfo.h.severity.toUpperCase()} · {formatKg(hoverInfo.h.estimated_waste_kg)}kg · {formatMinutes(hoverInfo.h.cleanup_time_minutes)}min
+    </div>
+    <div style={{ fontSize: 11, color: '#aaa', marginTop: 3 }}>Click to view photo →</div>
+  </div>
+)}
 
           {/* Crosshair overlay when picking */}
           {pickingStart && (

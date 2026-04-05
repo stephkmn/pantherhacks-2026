@@ -27,6 +27,20 @@ body {
   color: var(--text);
   overflow-x: hidden;
 }
+.marker-label {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  font-family: var(--font-display) !important;
+  font-size: 0.7rem !important;
+  font-weight: 700 !important;
+  color: #fff !important;
+  pointer-events: none !important;
+}
+
+.marker-label::before {
+  display: none !important;
+}
 html {
   scroll-behavior: smooth;
 }
@@ -395,7 +409,34 @@ html {
   padding: 12px 14px;
   text-align: center;
 }
-
+.num-label {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  font-family: var(--font-display) !important;
+  font-size: 0.72rem !important;
+  font-weight: 700 !important;
+  color: #fff !important;
+  pointer-events: none !important;
+  padding: 0 !important;
+}
+.num-label::before {
+  display: none !important;
+}
+.map-hover-card {
+  position: absolute;
+  z-index: 1000;
+  background: var(--dark2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  pointer-events: none;
+  font-size: 0.82rem;
+  color: var(--text);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  min-width: 180px;
+  white-space: nowrap;
+}
 .stat-num {
   font-family: var(--font-display);
   font-size: 1.6rem;
