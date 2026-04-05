@@ -228,17 +228,13 @@ function TitlePage({ onEnter }) {
       </div>
 
       <div className="title-content">
-        <div className="title-eyebrow">AI-POWERED URBAN CLEANUP</div>
-        <h1 className="title-logo">
-          <span className="title-sky">Sky</span>
-          <span className="title-sweep">Sweep</span>
-        </h1>
-        <p className="title-tagline">
-          Autonomous drone intelligence that finds, maps, and routes<br />
-          urban waste — before it becomes a crisis.
-        </p>
-        <button className="title-cta" onClick={onEnter}>Get Started</button>
-      </div>
+  <h1 className="title-logo">
+    <span className="title-sky">Sky</span>
+    <span className="title-sweep">Sweep</span>
+  </h1>
+  <div className="title-eyebrow">DRONE-POWERED WASTE DETECTION</div>
+  <button className="title-cta" onClick={onEnter}>Get Started</button>
+</div>
     </div>
   );
 }
@@ -753,8 +749,24 @@ function Dashboard() {
 
 // ── ROOT ──────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [page, setPage] = useState('title');
-  return page === 'title'
-    ? <TitlePage onEnter={() => setPage('dashboard')} />
-    : <Dashboard />;
+  const dashRef = useRef(null);
+  const topRef = useRef(null);
+
+  // Always scroll to top on reload
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
+  const scrollToDash = () => {
+    dashRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  return (
+    <div ref={topRef}>
+      <TitlePage onEnter={scrollToDash} />
+      <div ref={dashRef}>
+        <Dashboard />
+      </div>
+    </div>
+  );
 }
