@@ -1,4 +1,5 @@
 import io
+import os
 import unittest
 
 from fastapi.testclient import TestClient
@@ -7,7 +8,7 @@ from PIL import Image
 from backend.data_store import reset_data_store_for_tests
 from backend.main import app
 
-INGEST_HEADERS = {"X-API-Key": "dev-ingest-key"}
+INGEST_HEADERS = {"X-API-Key": os.getenv("INGEST_API_KEY", "dev-ingest-key")}
 
 
 class CleanSkyApiTests(unittest.TestCase):
