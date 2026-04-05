@@ -44,6 +44,7 @@ Protected endpoints:
 1. Apply SQL migration and seed data:
 - `backend/supabase/migrations/001_hourly_drone_trash.sql`
 - `backend/supabase/seeds/seed_orange_county_zip_centroids.sql`
+- `backend/supabase/seeds/seed_bay_area_zip_centroids.sql`
 - `backend/supabase/seeds/seed_trash_entries_from_zip_centroids.sql`
 
 2. Start app:
