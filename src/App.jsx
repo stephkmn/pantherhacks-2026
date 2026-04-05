@@ -140,52 +140,81 @@ function DroneCanvas({ active }) {
 // ── TITLE PAGE ────────────────────────────────────────────────────────────────
 function TitlePage({ onEnter }) {
   const [visible, setVisible] = useState(false);
+  const [dronePos, setDronePos] = useState({ x: -10, y: 20, rot: -15 });
+
   useEffect(() => { setTimeout(() => setVisible(true), 100); }, []);
+
+  useEffect(() => {
+    const waypoints = [
+      { x: -12, y: 18, rot: -10 },
+      { x: 30,  y: 8,  rot: 5   },
+      { x: 65,  y: 22, rot: -8  },
+      { x: 90,  y: 10, rot: 12  },
+      { x: 108, y: 30, rot: -5  },
+      { x: 75,  y: 55, rot: 15  },
+      { x: 40,  y: 45, rot: -12 },
+      { x: 10,  y: 60, rot: 8   },
+      { x: -12, y: 40, rot: -15 },
+    ];
+    let idx = 0;
+    let timeouts = [];
+    const fly = () => {
+      setDronePos(waypoints[idx % waypoints.length]);
+      idx++;
+      timeouts.push(setTimeout(fly, 1800));
+    };
+    timeouts.push(setTimeout(fly, 400));
+    return () => timeouts.forEach(clearTimeout);
+  }, []);
 
   return (
     <div className={`title-page ${visible ? 'visible' : ''}`}>
-      {/* Background image overlay */}
       <div className="title-bg" />
       <div className="title-noise" />
 
+      <div
+        className="drone-fly"
+        style={{ left: `${dronePos.x}vw`, top: `${dronePos.y}vh`, transform: `rotate(${dronePos.rot}deg)` }}
+      >
+        <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          {/* Arms */}
+          <line x1="32" y1="32" x2="8"  y2="8"  stroke="#00e5ff" strokeWidth="2" strokeLinecap="round"/>
+          <line x1="32" y1="32" x2="56" y2="8"  stroke="#00e5ff" strokeWidth="2" strokeLinecap="round"/>
+          <line x1="32" y1="32" x2="8"  y2="56" stroke="#00e5ff" strokeWidth="2" strokeLinecap="round"/>
+          <line x1="32" y1="32" x2="56" y2="56" stroke="#00e5ff" strokeWidth="2" strokeLinecap="round"/>
+          {/* Rotors */}
+          <ellipse cx="8"  cy="8"  rx="7" ry="3" fill="#00e5ff" opacity="0.7"><animateTransform attributeName="transform" type="rotate" from="0 8 8"   to="360 8 8"   dur="0.3s" repeatCount="indefinite"/></ellipse>
+          <ellipse cx="56" cy="8"  rx="7" ry="3" fill="#00e5ff" opacity="0.7"><animateTransform attributeName="transform" type="rotate" from="0 56 8"  to="360 56 8"  dur="0.3s" repeatCount="indefinite"/></ellipse>
+          <ellipse cx="8"  cy="56" rx="7" ry="3" fill="#00e5ff" opacity="0.7"><animateTransform attributeName="transform" type="rotate" from="0 8 56"  to="360 8 56"  dur="0.25s" repeatCount="indefinite"/></ellipse>
+          <ellipse cx="56" cy="56" rx="7" ry="3" fill="#00e5ff" opacity="0.7"><animateTransform attributeName="transform" type="rotate" from="0 56 56" to="360 56 56" dur="0.25s" repeatCount="indefinite"/></ellipse>
+          {/* Body */}
+          <rect x="26" y="26" width="12" height="12" rx="3" fill="#0c1527" stroke="#00e5ff" strokeWidth="1.5"/>
+          {/* Camera lens */}
+          <circle cx="32" cy="32" r="3" fill="#00e5ff" opacity="0.9"/>
+          <circle cx="32" cy="32" r="1.2" fill="#060b14"/>
+        </svg>
+        <div className="drone-fly-ring r1" />
+        <div className="drone-fly-ring r2" />
+        {/* 🛸
+        <div className="drone-fly-ring r1" />
+        <div className="drone-fly-ring r2" /> */}
+      </div>
+
       <div className="title-content">
         <div className="title-eyebrow">AI-POWERED URBAN CLEANUP</div>
-
         <h1 className="title-logo">
           <span className="title-sky">Sky</span>
           <span className="title-sweep">Sweep</span>
         </h1>
-
         <p className="title-tagline">
           Autonomous drone intelligence that finds, maps, and routes<br />
           urban waste — before it becomes a crisis.
         </p>
-
-        <div className="title-features">
-          <div className="title-feat"><span className="feat-icon">🛸</span>Drone Simulation</div>
-          <div className="title-feat"><span className="feat-icon">🗺️</span>Live Hotspot Mapping</div>
-          <div className="title-feat"><span className="feat-icon">📸</span>Real-Time Photo Intel</div>
-          <div className="title-feat"><span className="feat-icon">🧹</span>Optimized Cleanup Routes</div>
-        </div>
-
-        <button className="title-cta" onClick={onEnter}>
-          <span>Launch Mission</span>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <path d="M5 12h14M12 5l7 7-7 7"/>
-          </svg>
-        </button>
-      </div>
-
-      {/* Floating drone graphic */}
-      <div className="drone-float">
-        <div className="drone-body">🛸</div>
-        <div className="drone-ring ring1" />
-        <div className="drone-ring ring2" />
+        <button className="title-cta" onClick={onEnter}>Get Started</button>
       </div>
     </div>
   );
 }
-
 // ── PHOTO MODAL ───────────────────────────────────────────────────────────────
 function PhotoModal({ hotspot, onClose }) {
   if (!hotspot) return null;
