@@ -538,13 +538,22 @@ function Dashboard() {
         position={[h.lat, h.lng]}
         icon={icon}
         eventHandlers={{
-          click: () => { if (!isSkipped) setSelectedHotspot(h); },
-          mouseover: (e) => {
-            const { x, y } = e.containerPoint;
-            setHoverInfo({ h, stopNum, x, y });
-          },
-          mouseout: () => setHoverInfo(null),
-        }}
+  click: (e) => {
+    if (pickingStart) {
+      const { lat, lng } = e.latlng;
+      handleMapClick([lat, lng]);
+    } else {
+      if (!isSkipped) setSelectedHotspot(h);
+    }
+  },
+  mouseover: (e) => {
+    if (!pickingStart) {
+      const { x, y } = e.containerPoint;
+      setHoverInfo({ h, stopNum, x, y });
+    }
+  },
+  mouseout: () => setHoverInfo(null),
+}}
       />
       {!isSkipped && (
         <Circle
@@ -558,6 +567,28 @@ function Dashboard() {
     </React.Fragment>
   );
 })}
+{displayRoute && displayRoute.route_coordinates && displayRoute.route_coordinates.length > 1 && (
+              <Polyline
+                positions={displayRoute.route_coordinates}
+                color="#00e5ff" weight={3} opacity={0.85} dashArray="8,5"
+              />
+            )}
+            {startPin && (
+              <Marker
+                position={startPin}
+                icon={L.divIcon({
+                  className: '',
+                  html: `<div style="
+                    width:32px;height:32px;border-radius:50%;
+                    background:white;border:3px solid #00e5ff;
+                    display:flex;align-items:center;justify-content:center;
+                    font-size:16px;
+                  ">📍</div>`,
+                  iconSize: [32, 32],
+                  iconAnchor: [16, 16],
+                })}
+              />
+            )}
             <DroneCanvas active={scanning} />
           </MapContainer>
           {hoverInfo && (
