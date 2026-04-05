@@ -903,14 +903,14 @@ scanned.forEach((hotspot, i) => {
               <div>Scan results will appear here</div>
             </div>
           )}
+          
           {scanning && (
-            <div className="sidebar-empty">
-              {/* <div className="big-spin">🛸</div> */}
-              {/* <div>Drone scanning ZIP {zip}…</div> */}
-              <div>Detecting trash zones nearby...</div>
-              {/* <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>Detecting trash zones nearby</div> */}
-            </div>
-          )}
+  <div className="sidebar-empty">
+    <div className="scan-spinner" />
+    <div style={{ marginTop: 16, fontWeight: 600, fontSize: '1.2rem', color: 'var(--sky)' }}>Detecting trash zones nearby</div>
+    {/* <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: 6 }}>Flying drone over ZIP {zip}</div> */}
+  </div>
+)}
           {scanDone && !scanning && allHotspots.length === 0 && (
             <div className="sidebar-empty">
               <div style={{ fontSize: 40 }}></div>

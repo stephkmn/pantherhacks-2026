@@ -1061,6 +1061,14 @@ html {
   gap: 12px;
   margin-bottom: 12px;
 }
+.scan-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(0, 229, 255, 0.1);
+  border-top-color: var(--sky);
+  border-radius: 50%;
+  animation: spinIt 0.9s linear infinite;
+}
 
 .modal-stat {
   flex: 1;
