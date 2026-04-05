@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from backend.data_store import reset_data_store_for_tests
-from backend.main import app
+from backend.main import app, reset_community_sessions_for_tests
 
 INGEST_HEADERS = {"X-API-Key": os.getenv("INGEST_API_KEY", "dev-ingest-key")}
 
@@ -19,6 +19,7 @@ class CleanSkyApiTests(unittest.TestCase):
 
     def setUp(self):
         reset_data_store_for_tests()
+        reset_community_sessions_for_tests()
 
     def test_health(self):
         response = self.client.get("/api/health")
@@ -174,6 +175,94 @@ class CleanSkyApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         payload = response.json()
         self.assertEqual(payload["error"]["code"], "INVALID_CONTENT_TYPE")
+
+    def test_create_community_session(self):
+        response = self.client.post("/api/community-sessions")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("session_id", payload)
+        self.assertIn("round_id", payload)
+        self.assertEqual(payload["max_uploads"], 2)
+        self.assertEqual(payload["uploads_used"], 0)
+        self.assertEqual(payload["uploads_remaining"], 2)
+
+    def test_community_upload_persists_without_api_key(self):
+        session_response = self.client.post("/api/community-sessions")
+        session_id = session_response.json()["session_id"]
+
+        image = Image.new("RGB", (100, 100), color="white")
+        bytes_buffer = io.BytesIO()
+        image.save(bytes_buffer, format="PNG")
+        bytes_buffer.seek(0)
+
+        fake_result = {
+            "status": "ok",
+            "message": "Image analyzed successfully.",
+            "filename": "community.png",
+            "model_loaded": True,
+            "fallback_reason": None,
+            "detections": [
+                {"class": "trash", "confidence": 0.91, "bbox": [12.0, 12.0, 78.0, 78.0]},
+            ],
+            "total_objects": 1,
+            "average_confidence": 0.91,
+            "image_size": [100, 100],
+            "estimated_waste_kg": 0.05,
+        }
+
+        with patch("backend.main.detect_trash_yolo_from_bytes", return_value=fake_result):
+            response = self.client.post(
+                "/api/community-upload",
+                files={"file": ("community.png", bytes_buffer, "image/png")},
+                data={
+                    "session_id": session_id,
+                    "lat": "33.8446",
+                    "lng": "-117.9539",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["session_id"], session_id)
+        self.assertEqual(payload["persisted_detection_count"], 1)
+        self.assertEqual(payload["uploads_used"], 1)
+        self.assertEqual(payload["uploads_remaining"], 1)
+
+    def test_community_upload_limit_is_enforced(self):
+        session_response = self.client.post("/api/community-sessions")
+        session_id = session_response.json()["session_id"]
+
+        image = Image.new("RGB", (64, 64), color="white")
+
+        def build_buffer():
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG")
+            buffer.seek(0)
+            return buffer
+
+        for _ in range(2):
+            response = self.client.post(
+                "/api/community-upload",
+                files={"file": ("community.png", build_buffer(), "image/png")},
+                data={
+                    "session_id": session_id,
+                    "lat": "33.8446",
+                    "lng": "-117.9539",
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+
+        blocked = self.client.post(
+            "/api/community-upload",
+            files={"file": ("community.png", build_buffer(), "image/png")},
+            data={
+                "session_id": session_id,
+                "lat": "33.8446",
+                "lng": "-117.9539",
+            },
+        )
+        self.assertEqual(blocked.status_code, 429)
+        self.assertEqual(blocked.json()["error"]["code"], "COMMUNITY_UPLOAD_LIMIT_REACHED")
 
     def test_round_rollover_clears_positions_and_keeps_trash_history(self):
         first_round = self.client.post("/api/rounds/start", json={"drone_round_id": "round_a"}, headers=INGEST_HEADERS)

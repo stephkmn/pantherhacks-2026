@@ -14,14 +14,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from data_store import (
+from backend.data_store import (
     DEFAULT_RADIUS_KM,
     MAX_RADIUS_KM,
     compute_cleanup_time_minutes,
     compute_estimated_waste_kg,
     get_data_store,
 )
-from yolo_integration import detect_trash_yolo_from_bytes
+from backend.yolo_integration import detect_trash_yolo_from_bytes
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 
@@ -90,6 +90,23 @@ class DetectImageResponse(BaseModel):
     persisted_entries: list[dict[str, Any]] = Field(default_factory=list)
     persisted_detection_count: int = Field(default=0, ge=0)
     persistence_skipped_reason: str | None = None
+
+
+class CommunitySessionResponse(BaseModel):
+    session_id: str
+    round_id: str
+    upload_url: str
+    max_uploads: int = Field(ge=1)
+    uploads_used: int = Field(ge=0)
+    uploads_remaining: int = Field(ge=0)
+    created_at: datetime
+
+
+class CommunityUploadResponse(DetectImageResponse):
+    session_id: str
+    max_uploads: int = Field(ge=1)
+    uploads_used: int = Field(ge=0)
+    uploads_remaining: int = Field(ge=0)
 
 
 class ErrorEnvelope(BaseModel):
@@ -186,6 +203,9 @@ INGEST_API_KEY = os.getenv("INGEST_API_KEY", "dev-ingest-key")
 ENABLE_HOURLY_ROUND_AUTOMATION = os.getenv("ENABLE_HOURLY_ROUND_AUTOMATION", "false").lower() == "true"
 AUTO_ROUND_PREFIX = os.getenv("AUTO_ROUND_PREFIX", "auto_round")
 _hourly_round_task: asyncio.Task | None = None
+COMMUNITY_MAX_UPLOADS = 2
+COMMUNITY_DRONE_ID_PREFIX = "community_reporter"
+_community_sessions: dict[str, dict[str, Any]] = {}
 
 
 def _extract_ingest_token(
@@ -244,6 +264,134 @@ def _size_from_bbox(bbox: list[float], image_size: list[int]) -> int:
     bbox_height = max(0.0, y2 - y1)
     area_ratio = (bbox_width * bbox_height) / float(width * height)
     return min(10, max(1, int(round(area_ratio * 20)) or 1))
+
+
+def _upload_url_for_session(session_id: str) -> str:
+    return f"/?demo=community-upload&session={session_id}"
+
+
+def _build_community_session_response(session_data: dict[str, Any]) -> CommunitySessionResponse:
+    uploads_used = int(session_data["uploads_used"])
+    max_uploads = int(session_data["max_uploads"])
+    return CommunitySessionResponse(
+        session_id=str(session_data["session_id"]),
+        round_id=str(session_data["round_id"]),
+        upload_url=_upload_url_for_session(str(session_data["session_id"])),
+        max_uploads=max_uploads,
+        uploads_used=uploads_used,
+        uploads_remaining=max(0, max_uploads - uploads_used),
+        created_at=session_data["created_at"],
+    )
+
+
+def _get_community_session_or_404(session_id: str) -> dict[str, Any]:
+    session_data = _community_sessions.get(session_id)
+    if session_data is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "COMMUNITY_SESSION_NOT_FOUND",
+                "message": "The community upload session was not found or has expired.",
+            },
+        )
+    return session_data
+
+
+def reset_community_sessions_for_tests() -> None:
+    _community_sessions.clear()
+
+
+def _ensure_image_upload(file: UploadFile, contents: bytes) -> None:
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INVALID_CONTENT_TYPE",
+                "message": "Only image uploads are supported.",
+            },
+        )
+    if not contents:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "EMPTY_FILE",
+                "message": "Uploaded file is empty.",
+            },
+        )
+
+
+def _run_detection(image_bytes: bytes, filename: str) -> dict[str, Any]:
+    yolo_result = detect_trash_yolo_from_bytes(image_bytes, filename)
+    yolo_result["detections"] = [
+        {"class": det["class"], "confidence": det["confidence"], "bbox": det["bbox"]}
+        for det in yolo_result["detections"]
+    ]
+    return yolo_result
+
+
+def _persist_detection_entries(
+    *,
+    image_bytes: bytes,
+    filename: str,
+    detections: list[dict[str, Any]],
+    image_size: list[int],
+    round_id: str,
+    drone_id: str,
+    lat: float,
+    lng: float,
+    detected_at: datetime | None,
+    source: str,
+    extra_meta: dict[str, Any] | None = None,
+) -> tuple[str | None, list[dict[str, Any]], str | None]:
+    if not detections:
+        return None, [], "no_detections"
+
+    try:
+        photo_url = _data_store().upload_detection_image(image_bytes, filename)
+        record_time = detected_at or datetime.now(timezone.utc)
+        persisted_entries: list[dict[str, Any]] = []
+        for det in detections:
+            entry_meta = {
+                "detection": det,
+                "photo_url": photo_url,
+                "source": source,
+                "filename": filename,
+            }
+            if extra_meta:
+                entry_meta.update(extra_meta)
+            entry = _data_store().insert_trash_entry(
+                round_id=round_id,
+                drone_id=drone_id,
+                lat=lat,
+                lng=lng,
+                size=_size_from_bbox(det["bbox"], image_size),
+                detected_at=record_time,
+                meta=entry_meta,
+            )
+            persisted_entries.append(
+                {
+                    "id": entry.id,
+                    "round_id": entry.round_id,
+                    "drone_id": entry.drone_id,
+                    "detected_at": entry.detected_at.isoformat(),
+                    "lat": entry.lat,
+                    "lng": entry.lng,
+                    "size": entry.size,
+                    "meta": entry.meta,
+                }
+            )
+        return photo_url, persisted_entries, None
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "INGEST_PERSISTENCE_FAILED",
+                "message": (
+                    f"Detection persistence failed: {exc}. "
+                    "Verify SUPABASE_URL connectivity, storage bucket existence, and that round_id exists."
+                ),
+            },
+        ) from exc
 
 
 @app.exception_handler(RequestValidationError)
@@ -321,6 +469,28 @@ async def create_trash_entry(payload: TrashEntryCreateRequest):
         size=record.size,
         meta=record.meta,
     )
+
+
+@app.post("/api/community-sessions", response_model=CommunitySessionResponse)
+async def create_community_session():
+    session_id = f"community_{uuid4().hex[:12]}"
+    round_id = f"community_round_{uuid4().hex[:12]}"
+    round_model = _data_store().start_new_round(round_id=round_id)
+    session_data = {
+        "session_id": session_id,
+        "round_id": round_model.id,
+        "created_at": datetime.now(timezone.utc),
+        "uploads_used": 0,
+        "max_uploads": COMMUNITY_MAX_UPLOADS,
+    }
+    _community_sessions[session_id] = session_data
+    return _build_community_session_response(session_data)
+
+
+@app.get("/api/community-sessions/{session_id}", response_model=CommunitySessionResponse)
+async def get_community_session(session_id: str):
+    session_data = _get_community_session_or_404(session_id)
+    return _build_community_session_response(session_data)
 
 
 @app.get("/api/hotspots", response_model=list[ZipHotspotResponse])
@@ -585,31 +755,10 @@ async def detect_trash_in_image(
     - Return bounding boxes and classifications
     """
     
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "INVALID_CONTENT_TYPE",
-                "message": "Only image uploads are supported.",
-            },
-        )
-
     contents = await file.read()
-    if not contents:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "EMPTY_FILE",
-                "message": "Uploaded file is empty.",
-            },
-        )
-
-    yolo_result = detect_trash_yolo_from_bytes(contents, file.filename or "uploaded-image")
-    mapped_detections = [
-        {"class": det["class"], "confidence": det["confidence"], "bbox": det["bbox"]}
-        for det in yolo_result["detections"]
-    ]
-    yolo_result["detections"] = mapped_detections
+    _ensure_image_upload(file, contents)
+    yolo_result = _run_detection(contents, file.filename or "uploaded-image")
+    mapped_detections = yolo_result["detections"]
 
     ingest_fields = [round_id, drone_id, lat, lng]
     if any(value is not None for value in ingest_fields) and not all(value is not None for value in ingest_fields):
@@ -625,57 +774,78 @@ async def detect_trash_in_image(
     persisted_entries: list[dict[str, Any]] = []
     persistence_skipped_reason: str | None = None
     if round_id is not None and drone_id is not None and lat is not None and lng is not None:
-        if mapped_detections:
-            try:
-                ingest_lat = float(lat)
-                ingest_lng = float(lng)
-                photo_url = _data_store().upload_detection_image(contents, file.filename or "uploaded-image")
-                record_time = detected_at or datetime.now(timezone.utc)
-                for det in mapped_detections:
-                    entry = _data_store().insert_trash_entry(
-                        round_id=round_id,
-                        drone_id=drone_id,
-                        lat=ingest_lat,
-                        lng=ingest_lng,
-                        size=_size_from_bbox(det["bbox"], yolo_result["image_size"]),
-                        detected_at=record_time,
-                        meta={
-                            "detection": det,
-                            "photo_url": photo_url,
-                            "source": "detect-image",
-                            "filename": file.filename,
-                        },
-                    )
-                    persisted_entries.append(
-                        {
-                            "id": entry.id,
-                            "round_id": entry.round_id,
-                            "drone_id": entry.drone_id,
-                            "detected_at": entry.detected_at.isoformat(),
-                            "lat": entry.lat,
-                            "lng": entry.lng,
-                            "size": entry.size,
-                            "meta": entry.meta,
-                        }
-                    )
-            except RuntimeError as exc:
-                raise HTTPException(
-                    status_code=502,
-                    detail={
-                        "code": "INGEST_PERSISTENCE_FAILED",
-                        "message": (
-                            f"Detection persistence failed: {exc}. "
-                            "Verify SUPABASE_URL connectivity, storage bucket existence, and that round_id exists."
-                        ),
-                    },
-                ) from exc
-        else:
-            persistence_skipped_reason = "no_detections"
+        photo_url, persisted_entries, persistence_skipped_reason = _persist_detection_entries(
+            image_bytes=contents,
+            filename=file.filename or "uploaded-image",
+            detections=mapped_detections,
+            image_size=yolo_result["image_size"],
+            round_id=round_id,
+            drone_id=drone_id,
+            lat=float(lat),
+            lng=float(lng),
+            detected_at=detected_at,
+            source="detect-image",
+        )
 
     yolo_result["photo_url"] = photo_url
     yolo_result["persisted_entries"] = persisted_entries
     yolo_result["persisted_detection_count"] = len(persisted_entries)
     yolo_result["persistence_skipped_reason"] = persistence_skipped_reason
+    return yolo_result
+
+
+@app.post(
+    "/api/community-upload",
+    response_model=CommunityUploadResponse,
+    responses={
+        400: {"model": ErrorEnvelope, "description": "Invalid image input."},
+        404: {"model": ErrorEnvelope, "description": "Unknown community session."},
+        429: {"model": ErrorEnvelope, "description": "Upload limit reached for this session."},
+    },
+)
+async def community_upload_image(
+    file: UploadFile = File(...),
+    session_id: str = Form(...),
+    lat: float = Form(...),
+    lng: float = Form(...),
+    detected_at: datetime | None = Form(default=None),
+):
+    session_data = _get_community_session_or_404(session_id)
+    if int(session_data["uploads_used"]) >= int(session_data["max_uploads"]):
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "COMMUNITY_UPLOAD_LIMIT_REACHED",
+                "message": "This community upload session has already used both available photo uploads.",
+            },
+        )
+
+    contents = await file.read()
+    _ensure_image_upload(file, contents)
+    yolo_result = _run_detection(contents, file.filename or "community-upload")
+    photo_url, persisted_entries, persistence_skipped_reason = _persist_detection_entries(
+        image_bytes=contents,
+        filename=file.filename or "community-upload",
+        detections=yolo_result["detections"],
+        image_size=yolo_result["image_size"],
+        round_id=str(session_data["round_id"]),
+        drone_id=f"{COMMUNITY_DRONE_ID_PREFIX}_{session_id[:8]}",
+        lat=float(lat),
+        lng=float(lng),
+        detected_at=detected_at,
+        source="community-upload",
+        extra_meta={"community_session_id": session_id},
+    )
+    session_data["uploads_used"] = int(session_data["uploads_used"]) + 1
+
+    yolo_result["photo_url"] = photo_url
+    yolo_result["persisted_entries"] = persisted_entries
+    yolo_result["persisted_detection_count"] = len(persisted_entries)
+    yolo_result["persistence_skipped_reason"] = persistence_skipped_reason
+    yolo_result["session_id"] = session_id
+    yolo_result["max_uploads"] = int(session_data["max_uploads"])
+    yolo_result["uploads_used"] = int(session_data["uploads_used"])
+    yolo_result["uploads_remaining"] = max(0, int(session_data["max_uploads"]) - int(session_data["uploads_used"]))
     return yolo_result
 
 

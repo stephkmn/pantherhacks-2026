@@ -57,6 +57,21 @@ const formatLbs = (valueKg) => (Number(valueKg || 0) * KG_TO_LB).toFixed(2);
 const formatMiles = (valueKm) => (Number(valueKm || 0) * KM_TO_MI).toFixed(2);
 const formatMinutes = (value) => Math.round(Number(value || 0));
 const buildDefaultRoundId = () => `phone_demo_${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}`;
+const PUBLIC_APP_URL = (import.meta.env.VITE_PUBLIC_APP_URL || '').replace(/\/$/, '');
+const buildDemoUrl = (demo, extraParams = {}) => {
+  const baseUrl = PUBLIC_APP_URL || window.location.origin;
+  const url = new URL(baseUrl);
+  url.searchParams.set('demo', demo);
+  Object.entries(extraParams).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') {
+      url.searchParams.delete(key);
+    } else {
+      url.searchParams.set(key, value);
+    }
+  });
+  return url.toString();
+};
+const buildQrCodeUrl = (targetUrl) => `https://quickchart.io/qr?text=${encodeURIComponent(targetUrl)}&size=280`;
 // ── Nearest-neighbor route builder ───────────────────────────────────────────
 // Haversine distance in km between two [lat,lng] points
 function haversine([lat1, lng1], [lat2, lng2]) {
@@ -577,6 +592,10 @@ scanned.forEach((hotspot, i) => {
     setPickingStart(false);
   };
 
+  const openCommunityShare = () => {
+    window.open(buildDemoUrl('community-share'), '_blank', 'noopener,noreferrer');
+  };
+
   const filtered = activeFilter === 'all'
     ? allHotspots
     : allHotspots.filter(h => h.severity === activeFilter);
@@ -813,6 +832,9 @@ scanned.forEach((hotspot, i) => {
               <div>No zones detected for this scan.</div>
             </div>
           )}
+          <button className="community-entry-button" onClick={openCommunityShare}>
+            Community Upload
+          </button>
         </div>
 
         {/* Sidebar */}
@@ -927,6 +949,350 @@ scanned.forEach((hotspot, i) => {
         disposalLoading={nearbyDisposalLoading}
         disposalError={nearbyDisposalError}
       />
+    </div>
+  );
+}
+
+function CommunitySharePage() {
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let ignore = false;
+
+    const createSession = async () => {
+      setLoading(true);
+      setError('');
+      try {
+        const response = await axios.post('/api/community-sessions');
+        if (ignore) return;
+        const payload = response.data;
+        const uploadUrl = buildDemoUrl('community-upload', { session: payload.session_id });
+        setSession({
+          ...payload,
+          uploadUrl,
+          qrCodeUrl: buildQrCodeUrl(uploadUrl),
+        });
+      } catch (err) {
+        if (!ignore) {
+          setError(err?.response?.data?.error?.message || 'Unable to create a community upload session.');
+        }
+      } finally {
+        if (!ignore) {
+          setLoading(false);
+        }
+      }
+    };
+
+    createSession();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  return (
+    <div className="mobile-demo community-share">
+      <div className="mobile-demo__hero">
+        <div className="mobile-demo__eyebrow">Community Upload</div>
+        <h1>Scan to report trash from your phone.</h1>
+        <p>
+          Each QR code creates a fresh community session. The person scanning it can upload up to two photos with no API key.
+        </p>
+      </div>
+      <div className="mobile-demo__panel community-share__panel">
+        {loading && <div className="mobile-demo__placeholder community-share__placeholder">Generating a QR code...</div>}
+        {!loading && error && <div className="mobile-demo__error">{error}</div>}
+        {!loading && session && (
+          <>
+            <img src={session.qrCodeUrl} alt="Community upload QR code" className="community-share__qr" />
+            <div className="community-share__details">
+              <div>Session: {session.session_id}</div>
+              <div>Uploads available: {session.uploads_remaining}</div>
+            </div>
+            <a className="mobile-demo__link" href={session.uploadUrl} target="_blank" rel="noreferrer">
+              Open upload page
+            </a>
+            <div className="community-share__url">{session.uploadUrl}</div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CommunityUploadPage() {
+  const searchParams = new URLSearchParams(window.location.search);
+  const sessionId = searchParams.get('session') || '';
+  const uploadInputId = 'community-upload-input';
+  const [session, setSession] = useState(null);
+  const [loadingSession, setLoadingSession] = useState(true);
+  const [sessionError, setSessionError] = useState('');
+  const [captureFile, setCaptureFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [lat, setLat] = useState('');
+  const [lng, setLng] = useState('');
+  const [locationLabel, setLocationLabel] = useState('Location not captured yet');
+  const [locating, setLocating] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [result, setResult] = useState(null);
+  const [toastMessage, setToastMessage] = useState('');
+
+  useEffect(() => {
+    if (!captureFile) {
+      setPreviewUrl('');
+      return undefined;
+    }
+    const objectUrl = URL.createObjectURL(captureFile);
+    setPreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [captureFile]);
+
+  useEffect(() => {
+    if (!toastMessage) return undefined;
+    const timeoutId = window.setTimeout(() => setToastMessage(''), 3200);
+    return () => window.clearTimeout(timeoutId);
+  }, [toastMessage]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    const loadSession = async () => {
+      if (!sessionId) {
+        setSessionError('This community upload link is missing a session token.');
+        setLoadingSession(false);
+        return;
+      }
+
+      setLoadingSession(true);
+      setSessionError('');
+      try {
+        const response = await axios.get(`/api/community-sessions/${sessionId}`);
+        if (!ignore) {
+          setSession(response.data);
+        }
+      } catch (err) {
+        if (!ignore) {
+          setSessionError(err?.response?.data?.error?.message || 'Unable to load the community session.');
+        }
+      } finally {
+        if (!ignore) {
+          setLoadingSession(false);
+        }
+      }
+    };
+
+    loadSession();
+    return () => {
+      ignore = true;
+    };
+  }, [sessionId]);
+
+  const captureLocation = async () => {
+    if (!navigator.geolocation) {
+      setLocationLabel('Geolocation is unavailable on this device.');
+      return null;
+    }
+
+    setLocating(true);
+    try {
+      const position = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 30000,
+        });
+      });
+      const nextLat = position.coords.latitude.toFixed(6);
+      const nextLng = position.coords.longitude.toFixed(6);
+      setLat(nextLat);
+      setLng(nextLng);
+      setLocationLabel('Using live location.');
+      return { lat: nextLat, lng: nextLng };
+    } catch {
+      setLocationLabel('Location unavailable.');
+      return null;
+    } finally {
+      setLocating(false);
+    }
+  };
+
+  const handleFileChange = (event) => {
+    const nextFile = event.target.files?.[0];
+    if (!nextFile) return;
+    setCaptureFile(nextFile);
+    setUploadError('');
+    setResult(null);
+  };
+
+  const submitUpload = async () => {
+    if (!sessionId) {
+      setUploadError('This community upload session is missing.');
+      return;
+    }
+    if (!captureFile) {
+      setUploadError('Choose a photo before uploading.');
+      return;
+    }
+    if ((session?.uploads_remaining ?? 0) <= 0) {
+      setUploadError('This session has already used both community uploads.');
+      return;
+    }
+
+    let activeLat = lat.trim();
+    let activeLng = lng.trim();
+    if (!activeLat || !activeLng) {
+      const gps = await captureLocation();
+      activeLat = gps?.lat || activeLat;
+      activeLng = gps?.lng || activeLng;
+    }
+    if (!activeLat || !activeLng) {
+      setUploadError('Location is required to submit a community report.');
+      return;
+    }
+
+    setUploading(true);
+    setUploadError('');
+    try {
+      const formData = new FormData();
+      formData.append('file', captureFile);
+      formData.append('session_id', sessionId);
+      formData.append('lat', activeLat);
+      formData.append('lng', activeLng);
+      formData.append('detected_at', new Date().toISOString());
+
+      const response = await axios.post('/api/community-upload', formData);
+      setResult(response.data);
+      setSession((prev) => prev ? {
+        ...prev,
+        uploads_used: response.data.uploads_used,
+        uploads_remaining: response.data.uploads_remaining,
+      } : prev);
+
+      if (response.data.persisted_detection_count > 0) {
+        setToastMessage('Trash entry uploaded to the database.');
+      } else {
+        setToastMessage('Photo uploaded. No trash entry was created because nothing was detected.');
+      }
+    } catch (err) {
+      const message = err?.response?.data?.error?.message || 'Unable to upload the community report.';
+      setUploadError(message);
+      if (err?.response?.status === 429) {
+        setSession((prev) => prev ? { ...prev, uploads_remaining: 0, uploads_used: prev.max_uploads } : prev);
+      }
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="mobile-demo community-upload">
+      <header className="dash-header community-upload__header">
+        <div className="dash-logo">
+          <span className="dash-sky">Sky</span><span className="dash-sweep">Sweep</span>
+        </div>
+      </header>
+      <div className="mobile-demo__hero">
+        <div className="mobile-demo__eyebrow">Community Report</div>
+        <h1>Upload up to two trash photos from your phone.</h1>
+        <p>Each community session is limited to two photo uploads.</p>
+      </div>
+
+      <div className="mobile-demo__panel">
+        {loadingSession && <div className="mobile-demo__placeholder community-share__placeholder">Loading session...</div>}
+        {!loadingSession && sessionError && <div className="mobile-demo__error">{sessionError}</div>}
+        {!loadingSession && session && (
+          <div className="mobile-demo__session">
+            <div>Session: {session.session_id}</div>
+            <div>Uploads used: {session.uploads_used} / {session.max_uploads}</div>
+            <div>Uploads remaining: {session.uploads_remaining}</div>
+            <div>{locationLabel}</div>
+          </div>
+        )}
+      </div>
+
+      <div className="mobile-demo__panel">
+        <div className="mobile-demo__actions">
+          <label
+            htmlFor={uploadInputId}
+            className={`mobile-demo__button mobile-demo__button--label ${!session || session.uploads_remaining <= 0 ? 'mobile-demo__button--disabled' : ''}`}
+            aria-disabled={!session || session.uploads_remaining <= 0}
+          >
+            {captureFile ? 'Choose Another Photo' : 'Take Photo'}
+          </label>
+          <button type="button" className="mobile-demo__button mobile-demo__button--secondary" onClick={submitUpload} disabled={uploading || !session || session.uploads_remaining <= 0}>
+            {uploading ? 'Uploading...' : 'Upload Report'}
+          </button>
+          <input
+            id={uploadInputId}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleFileChange}
+            className="mobile-demo__hidden-input"
+            disabled={!session || session.uploads_remaining <= 0}
+          />
+        </div>
+
+        {uploadError && <div className="mobile-demo__error">{uploadError}</div>}
+
+        <div className="mobile-demo__preview">
+          <div className="mobile-demo__image-wrap">
+            {previewUrl ? (
+              <img src={previewUrl} alt="Community upload preview" className="mobile-demo__image" />
+            ) : (
+              <div className="mobile-demo__placeholder">Your selected photo will appear here.</div>
+            )}
+            {previewUrl && result?.detections?.map((det, index) => {
+              const [x1, y1, x2, y2] = det.bbox;
+              const [width, height] = result.image_size || [1, 1];
+              return (
+                <div
+                  key={`${det.class_name || det.class}-${index}`}
+                  className="mobile-demo__bbox"
+                  style={{
+                    left: `${(x1 / width) * 100}%`,
+                    top: `${(y1 / height) * 100}%`,
+                  width: `${((x2 - x1) / width) * 100}%`,
+                  height: `${((y2 - y1) / height) * 100}%`,
+                }}
+                />
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {result && (
+        <div className="mobile-demo__panel">
+          <div className="mobile-demo__result-header">
+            <h2>Latest Upload</h2>
+            <div>{result.total_objects} object{result.total_objects === 1 ? '' : 's'} found</div>
+          </div>
+          <div className="mobile-demo__stats">
+            <div className="mobile-demo__stat">
+              <strong>{result.uploads_remaining}</strong>
+              <span>Uploads left</span>
+            </div>
+            <div className="mobile-demo__stat">
+              <strong>{result.persisted_detection_count || 0}</strong>
+              <span>Trash entries saved</span>
+            </div>
+            <div className="mobile-demo__stat">
+              <strong>{result.photo_url ? 'Yes' : 'No'}</strong>
+              <span>Photo uploaded</span>
+            </div>
+          </div>
+          {result.photo_url && (
+            <a className="mobile-demo__link" href={result.photo_url} target="_blank" rel="noreferrer">
+              Open uploaded photo
+            </a>
+          )}
+        </div>
+      )}
+
+      {toastMessage && <div className="mobile-demo__toast">{toastMessage}</div>}
     </div>
   );
 }
@@ -1357,7 +1723,7 @@ export default function App() {
   const dashRef = useRef(null);
   const titleRef = useRef(null);
   const [started, setStarted] = useState(false);
-  const isMobileDemo = new URLSearchParams(window.location.search).get('demo') === 'mobile';
+  const activeDemo = new URLSearchParams(window.location.search).get('demo');
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -1381,8 +1747,16 @@ export default function App() {
     }, 1100);
   };
 
-  if (isMobileDemo) {
+  if (activeDemo === 'mobile') {
     return <MobileDetectorDemo />;
+  }
+
+  if (activeDemo === 'community-share') {
+    return <CommunitySharePage />;
+  }
+
+  if (activeDemo === 'community-upload') {
+    return <CommunityUploadPage />;
   }
 
   return (
