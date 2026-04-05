@@ -14,14 +14,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from data_store import (
+from backend.data_store import (
     DEFAULT_RADIUS_KM,
     MAX_RADIUS_KM,
     compute_cleanup_time_minutes,
     compute_estimated_waste_kg,
     get_data_store,
 )
-from yolo_integration import detect_trash_yolo_from_bytes
+from backend.yolo_integration import detect_trash_yolo_from_bytes
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 

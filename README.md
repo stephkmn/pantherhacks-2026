@@ -15,6 +15,7 @@ Optional:
 - `YOLO_MODEL_PATH`
 - `ENABLE_HOURLY_ROUND_AUTOMATION`
 - `AUTO_ROUND_PREFIX`
+- `VITE_GOOGLE_MAPS_API_KEY` (optional, for higher-reliability Street View images in frontend)
 
 ### Dev vs Prod
 - Dev: set `ENABLE_HOURLY_ROUND_AUTOMATION=false`
