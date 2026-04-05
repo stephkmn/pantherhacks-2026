@@ -317,6 +317,8 @@ class SupabaseDataStore:
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8")
             raise RuntimeError(f"Supabase storage upload failed: {detail}") from exc
+        except error.URLError as exc:
+            raise RuntimeError(f"Supabase storage upload failed: {exc}") from exc
 
         signed_ttl_seconds = int(os.getenv("SUPABASE_STORAGE_SIGNED_URL_TTL_SECONDS", "0"))
         if signed_ttl_seconds > 0:
@@ -340,6 +342,8 @@ class SupabaseDataStore:
             except error.HTTPError as exc:
                 detail = exc.read().decode("utf-8")
                 raise RuntimeError(f"Supabase storage sign failed: {detail}") from exc
+            except error.URLError as exc:
+                raise RuntimeError(f"Supabase storage sign failed: {exc}") from exc
 
         return f"{self.base_url}/storage/v1/object/public/{bucket}/{quote(object_path, safe='/')}"
 
