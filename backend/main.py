@@ -563,16 +563,18 @@ async def detect_trash_in_image(
 
     photo_url: str | None = None
     persisted_entries: list[dict[str, Any]] = []
-    if all(value is not None for value in ingest_fields):
+    if round_id is not None and drone_id is not None and lat is not None and lng is not None:
         try:
+            ingest_lat = float(lat)
+            ingest_lng = float(lng)
             photo_url = _data_store().upload_detection_image(contents, file.filename or "uploaded-image")
             record_time = detected_at or datetime.now(timezone.utc)
             for det in mapped_detections:
                 entry = _data_store().insert_trash_entry(
                     round_id=round_id,
                     drone_id=drone_id,
-                    lat=float(lat),
-                    lng=float(lng),
+                    lat=ingest_lat,
+                    lng=ingest_lng,
                     size=_size_from_bbox(det["bbox"], yolo_result["image_size"]),
                     detected_at=record_time,
                     meta={
