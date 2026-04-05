@@ -14,14 +14,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from data_store import (
+from backend.data_store import (
     DEFAULT_RADIUS_KM,
     MAX_RADIUS_KM,
     compute_cleanup_time_minutes,
     compute_estimated_waste_kg,
     get_data_store,
 )
-from yolo_integration import detect_trash_yolo_from_bytes
+from backend.yolo_integration import detect_trash_yolo_from_bytes
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env")
 
@@ -351,7 +351,7 @@ async def get_hotspots(zip: str, radius_km: float = DEFAULT_RADIUS_KM):
             total_size=item["total_size"],
             score=item["score"],
             color=item["color"],
-            estimated_waste_kg=float(item.get("estimated_waste_kg", compute_estimated_waste_kg(item["total_size"]))),
+            estimated_waste_kg=round(float(item.get("estimated_waste_kg", compute_estimated_waste_kg(item["total_size"]))), 2),
             cleanup_time_minutes=int(item.get("cleanup_time_minutes", compute_cleanup_time_minutes(item["pile_count"]))),
             last_detected_at=datetime.fromisoformat(item["last_detected_at"]),
             photo_url=item.get("photo_url"),
@@ -563,16 +563,18 @@ async def detect_trash_in_image(
 
     photo_url: str | None = None
     persisted_entries: list[dict[str, Any]] = []
-    if all(value is not None for value in ingest_fields):
+    if round_id is not None and drone_id is not None and lat is not None and lng is not None:
         try:
+            ingest_lat = float(lat)
+            ingest_lng = float(lng)
             photo_url = _data_store().upload_detection_image(contents, file.filename or "uploaded-image")
             record_time = detected_at or datetime.now(timezone.utc)
             for det in mapped_detections:
                 entry = _data_store().insert_trash_entry(
                     round_id=round_id,
                     drone_id=drone_id,
-                    lat=float(lat),
-                    lng=float(lng),
+                    lat=ingest_lat,
+                    lng=ingest_lng,
                     size=_size_from_bbox(det["bbox"], yolo_result["image_size"]),
                     detected_at=record_time,
                     meta={

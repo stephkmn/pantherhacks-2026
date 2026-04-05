@@ -47,6 +47,10 @@ Protected endpoints:
 - `backend/supabase/seeds/seed_orange_county_zip_centroids.sql`
 - `backend/supabase/seeds/seed_bay_area_zip_centroids.sql`
 - `backend/supabase/seeds/seed_trash_entries_from_zip_centroids.sql`
+- `backend/supabase/seeds/seed_demo_high_density_hotspots.sql` (optional demo: dense red/yellow multi-hotspot ZIPs)
+
+Optional: regenerate irregular demo hotspots with Python random:
+- `python backend/supabase/generate_demo_hotspots_seed.py --seed 20260405`
 
 2. Start app:
 - `./scripts/start-local.sh`
