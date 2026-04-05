@@ -8,7 +8,9 @@ venv
 backend/tests/test_images/
 backend/tests/image_test_outputs/
 backend/models/
+backend/qr/
 
 supabase/
 dist/
 dist/index.html
+backend/qr/qr_code.png
