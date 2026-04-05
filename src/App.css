@@ -87,6 +87,7 @@ body {
 }
 html {
   scroll-behavior: smooth;
+  overflow-y: scroll;
 }
 
 /* ── TITLE PAGE ───────────────────────────────────────────────────────────── */
@@ -394,7 +395,7 @@ html {
   height: 100%;
   background: var(--sky);
   border-radius: 100px;
-  animation: scanFill 2.8s ease-in-out forwards;
+  animation: scanFill 4s ease-in-out forwards;
 }
 @keyframes scanFill { from { width: 0%; } to { width: 100%; } }
 
@@ -410,6 +411,7 @@ html {
 .map-wrap {
   position: relative;
   overflow: hidden;
+  
 }
 .map-instruction {
   position: absolute;
@@ -1063,6 +1065,10 @@ html {
   background: var(--dark2) !important;
   color: var(--text) !important;
   border-color: var(--border) !important;
+  width: 35px !important;
+  height: 35px !important;
+  line-height: 36px !important;
+  font-size: 20px !important;
 }
 
 /* ── Scrollbar ─────────────────────────────────────────────────────────── */

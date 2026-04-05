@@ -132,62 +132,110 @@ function MapRecenter({ center }) {
 }
 
 // ── Drone animation overlay (canvas) ─────────────────────────────────────────
-function DroneCanvas({ active }) {
-  const canvasRef = useRef(null);
-  const animRef = useRef(null);
+// function DroneCanvas({ active }) {
+//   const canvasRef = useRef(null);
+//   const animRef = useRef(null);
+
+//   useEffect(() => {
+//     if (!active) return;
+//     const canvas = canvasRef.current;
+//     if (!canvas) return;
+//     const ctx = canvas.getContext('2d');
+//     let t = 0;
+
+//     const draw = () => {
+//       ctx.clearRect(0, 0, canvas.width, canvas.height);
+//       // Drone path sweep lines
+//       ctx.strokeStyle = 'rgba(0,230,255,0.18)';
+//       ctx.lineWidth = 1;
+//       for (let i = 0; i < 8; i++) {
+//         const y = ((t * 0.4 + i * 40) % canvas.height);
+//         ctx.beginPath();
+//         ctx.moveTo(0, y);
+//         ctx.lineTo(canvas.width, y);
+//         ctx.stroke();
+//       }
+//       // Drone dot
+//       const dx = 60 + (Math.sin(t * 0.02) * 0.5 + 0.5) * (canvas.width - 120);
+//       const dy = 60 + (Math.sin(t * 0.013 + 1) * 0.5 + 0.5) * (canvas.height - 120);
+//       ctx.beginPath();
+//       ctx.arc(dx, dy, 7, 0, Math.PI * 2);
+//       ctx.fillStyle = 'rgba(0,230,255,0.9)';
+//       ctx.fill();
+//       // Pulse ring
+//       ctx.beginPath();
+//       ctx.arc(dx, dy, 7 + (t % 40) * 0.6, 0, Math.PI * 2);
+//       ctx.strokeStyle = `rgba(0,230,255,${0.6 - (t % 40) * 0.015})`;
+//       ctx.lineWidth = 1.5;
+//       ctx.stroke();
+//       t++;
+//       animRef.current = requestAnimationFrame(draw);
+//     };
+//     animRef.current = requestAnimationFrame(draw);
+//     return () => cancelAnimationFrame(animRef.current);
+//   }, [active]);
+
+//   if (!active) return null;
+//   return (
+//     <canvas
+//       ref={canvasRef}
+//       width={800} height={600}
+//       style={{
+//         position: 'absolute', inset: 0, width: '100%', height: '100%',
+//         pointerEvents: 'none', zIndex: 500, opacity: 0.7,
+//       }}
+//     />
+//   );
+// }
+function DroneOverlay({ active }) {
+  const [pos, setPos] = useState({ x: -100, y: -100 });
+  const mapWrapRef = useRef(null);
+  const timeoutsRef = useRef([]);
 
   useEffect(() => {
-    if (!active) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    let t = 0;
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
 
-    const draw = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      // Drone path sweep lines
-      ctx.strokeStyle = 'rgba(0,230,255,0.18)';
-      ctx.lineWidth = 1;
-      for (let i = 0; i < 8; i++) {
-        const y = ((t * 0.4 + i * 40) % canvas.height);
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
-        ctx.stroke();
-      }
-      // Drone dot
-      const dx = 60 + (Math.sin(t * 0.02) * 0.5 + 0.5) * (canvas.width - 120);
-      const dy = 60 + (Math.sin(t * 0.013 + 1) * 0.5 + 0.5) * (canvas.height - 120);
-      ctx.beginPath();
-      ctx.arc(dx, dy, 7, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0,230,255,0.9)';
-      ctx.fill();
-      // Pulse ring
-      ctx.beginPath();
-      ctx.arc(dx, dy, 7 + (t % 40) * 0.6, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(0,230,255,${0.6 - (t % 40) * 0.015})`;
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      t++;
-      animRef.current = requestAnimationFrame(draw);
+    if (!active) return;
+
+    const fly = () => {
+      const el = mapWrapRef.current?.parentElement;
+      const W = el?.offsetWidth || 900;
+      const H = el?.offsetHeight || 600;
+
+      const x = 60 + Math.random() * (W - 120);
+      const y = 60 + Math.random() * (H - 120);
+
+      setPos({ x, y });
+
+      const id = setTimeout(fly, 900 + Math.random() * 600);
+      timeoutsRef.current.push(id);
     };
-    animRef.current = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(animRef.current);
+
+    fly();
+    return () => timeoutsRef.current.forEach(clearTimeout);
   }, [active]);
 
   if (!active) return null;
+
   return (
-    <canvas
-      ref={canvasRef}
-      width={800} height={600}
+    <div
+      ref={mapWrapRef}
       style={{
-        position: 'absolute', inset: 0, width: '100%', height: '100%',
-        pointerEvents: 'none', zIndex: 500, opacity: 0.7,
+        position: 'absolute',
+        left: pos.x,
+        top: pos.y,
+        transform: 'translate(-50%, -50%)',
+        zIndex: 1000,
+        pointerEvents: 'none',
+        transition: 'left 0.8s cubic-bezier(0.45,0,0.55,1), top 0.8s cubic-bezier(0.45,0,0.55,1)',
+        filter: 'drop-shadow(0 0 14px rgba(0,229,255,0.8))',
       }}
-    />
+    >
+      <img src="/drone.png" alt="" width={72} />
+    </div>
   );
 }
-
 // ── TITLE PAGE ────────────────────────────────────────────────────────────────
 function TitlePage({ onEnter }) {
   const [visible, setVisible] = useState(false);
@@ -427,12 +475,20 @@ const cardRefs = useRef({});
 
   // Active hotspots = all minus skipped
   const activeHotspots = allHotspots.filter(h => !skipped.has(h.id));
+  const filteredActive = activeFilter === 'all'
+  ? activeHotspots
+  : activeHotspots.filter(h => h.severity === activeFilter);
 
   // Recompute route whenever start pin or active hotspots change
+  // useEffect(() => {
+  //   if (!startPin || !activeHotspots.length) { setRoute(null); return; }
+  //   setRoute(buildRouteFromStart(startPin, activeHotspots));
+  // }, [startPin, skipped, allHotspots]);
+
   useEffect(() => {
-    if (!startPin || !activeHotspots.length) { setRoute(null); return; }
-    setRoute(buildRouteFromStart(startPin, activeHotspots));
-  }, [startPin, skipped, allHotspots]);
+  if (!startPin || !filteredActive.length) { setRoute(null); return; }
+  setRoute(buildRouteFromStart(startPin, filteredActive));
+}, [startPin, skipped, allHotspots, activeFilter]);
 
   const runScan = async () => {
     if (!zip || zip.length < 5) return;
@@ -444,10 +500,18 @@ const cardRefs = useRef({});
     setStartPin(null);
     setRoute(null);
     setPrefetchedRoute(null);
+    const MIN_SCAN_MS = 4000; // minimum time the "scanning" state shows
+    const startTime = Date.now();
+
     try {
       const hotspotsResponse = await axios.get('/api/hotspots', {
         params: { zip, radius_km: 2.0 },
       });
+       const elapsed = Date.now() - startTime;
+    if (elapsed < MIN_SCAN_MS) {
+      await new Promise(res => setTimeout(res, MIN_SCAN_MS - elapsed));
+    }
+
       const scanned = (hotspotsResponse.data || []).map((hotspot, idx) => ({
         id: hotspot.hotspot_id,
         lat: hotspot.lat,
@@ -466,7 +530,14 @@ const cardRefs = useRef({});
         photo: buildStreetViewUrl(hotspot.lat, hotspot.lng),
         map_preview: buildStaticMapUrl(hotspot.lat, hotspot.lng),
       }));
-      setAllHotspots(scanned);
+      //setAllHotspots(scanned);
+      setAllHotspots([]);
+scanned.forEach((hotspot, i) => {
+  setTimeout(() => {
+    setAllHotspots(prev => [...prev, hotspot]);
+  }, i * 80);
+});
+      
 
       if (scanned.length > 0) {
         const centerLat = scanned.reduce((sum, h) => sum + h.lat, 0) / scanned.length;
@@ -548,7 +619,7 @@ const cardRefs = useRef({});
       {scanning && (
         <div className="scan-progress">
           <div className="scan-bar"><div className="scan-fill" /></div>
-          <span>Deploying drone over ZIP {zip}…</span>
+          <span>Flying drone over ZIP Code {zip}</span>
         </div>
       )}
       {scanDone && allHotspots.length > 0 && (
@@ -567,7 +638,7 @@ const cardRefs = useRef({});
           ) : (
             <>
               <span className="start-hint start-set">
-                The route covers {activeHotspots.length} stop{activeHotspots.length !== 1 ? 's' : ''}
+                The route covers {filteredActive.length} stop{filteredActive.length !== 1 ? 's' : ''}
                 {skipped.size > 0 && <span className="skipped-badge">{skipped.size} skipped</span>}
               </span>
               <button className="pick-btn" onClick={() => { setStartPin(null); setRoute(null); }}>Reset</button>
@@ -581,15 +652,15 @@ const cardRefs = useRef({});
     {scanDone && (
       <div className="top-stats">
         <div className="stat-box">
-          <div className="stat-num">{activeHotspots.length}</div>
+          <div className="stat-num">{filteredActive.length}</div>
           <div className="stat-lbl">Active Stops</div>
         </div>
         <div className="stat-box">
-          <div className="stat-num">{formatLbs(activeHotspots.reduce((s,h)=>s+h.estimated_waste_kg,0))}<small>lb</small></div>
+          <div className="stat-num">{formatLbs(filteredActive.reduce((s,h)=>s+h.estimated_waste_kg,0))}<small>lb</small></div>
           <div className="stat-lbl">Est. Waste</div>
         </div>
         <div className="stat-box">
-          <div className="stat-num">{formatMinutes(activeHotspots.reduce((s,h)=>s+h.cleanup_time_minutes,0))}<small>m</small></div>
+          <div className="stat-num">{formatMinutes(filteredActive.reduce((s,h)=>s+h.cleanup_time_minutes,0))}<small>m</small></div>
           <div className="stat-lbl">Cleanup Time</div>
         </div>
         {displayRoute && (
@@ -607,6 +678,7 @@ const cardRefs = useRef({});
       <div className="dash-grid">
         {/* Map */}
         <div className={`map-wrap ${pickingStart ? 'cursor-crosshair' : ''}`}>
+          <DroneOverlay active={scanning} /> {}
           <MapContainer center={mapCenter} zoom={14} style={{ height: '100%', width: '100%' }}>
             <MapRecenter center={mapCenter} />
             <TileLayer
@@ -701,9 +773,10 @@ const cardRefs = useRef({});
     })}
   />
 )}
-            <DroneCanvas active={scanning} />
+            {/* <DroneCanvas active={scanning} /> */}
+            {/* <DroneOverlay active={scanning} /> */}
           </MapContainer>
-          {scanDone && !startPin && !scanning && allHotspots.length > 0 && (
+          {scanDone && !startPin && !scanning && !pickingStart && allHotspots.length > 0 && (
   <div className="map-instruction">
     <div className="map-instruction-inner">
       Click the <strong>Pick Start</strong> button above to start planning your route
@@ -712,25 +785,25 @@ const cardRefs = useRef({});
 )}
           {hoverInfo && (
  <div className="map-hover-card" style={{ left: hoverInfo.x + 16, top: hoverInfo.y - 10 }}>
-  <strong>Stop #{hoverInfo.stopNum}</strong>
+  <strong>Zone #{hoverInfo.stopNum}</strong>
   <div style={{ color: getSeverityColor(hoverInfo.h.severity), fontSize: 11, marginTop: 3 }}>
     ● {hoverInfo.h.severity.toUpperCase()} · {formatLbs(hoverInfo.h.estimated_waste_kg)}lb · {formatMinutes(hoverInfo.h.cleanup_time_minutes)}min
   </div>
-  <div style={{ fontSize: 11, color: '#aaa', marginTop: 3 }}>Click to view photo</div>
+  {/* <div style={{ fontSize: 11, color: '#aaa', marginTop: 3 }}>Click to view photo</div> */}
 </div>
 )}
 
           {/* Crosshair overlay when picking */}
-          {pickingStart && (
+          {/* {pickingStart && (
             <div className="crosshair-overlay">
               <div className="crosshair-msg">Click to drop your start pin</div>
             </div>
-          )}
+          )} */}
 
           {!scanDone && !scanning && (
             <div className="map-idle">
               {/* <div className="map-idle-icon">🛸</div> */}
-              <div>Enter a ZIP code above to deploy drone scan</div>
+              {/* <div>Enter a ZIP code above to deploy drone scan</div> */}
             </div>
           )}
           {scanDone && !scanning && allHotspots.length === 0 && (
@@ -750,7 +823,8 @@ const cardRefs = useRef({});
             <div className="filter-tabs">
               {['all', 'high', 'medium', 'low'].map(f => (
                 <button key={f} className={`ftab ${activeFilter === f ? 'active' : ''} ftab-${f}`}
-                  onClick={() => setActiveFilter(f)}>
+                  // onClick={() => setActiveFilter(f)}
+                  onClick={() => { setActiveFilter(f); setStartPin(null); setRoute(null); }}>
                   {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
                 </button>
               ))}
@@ -820,12 +894,7 @@ const cardRefs = useRef({});
           )} */}
 
           {/* No start pin yet but scan done */}
-          {scanDone && !startPin && (
-            <div className="sidebar-empty" style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 32 }}></div>
-              {/* <div>Click <strong>"Pick Start"</strong> above then tap the map to set where you're cleaning from</div> */}
-            </div>
-          )}
+         
 
           {!scanDone && !scanning && (
             <div className="sidebar-empty">
@@ -836,8 +905,9 @@ const cardRefs = useRef({});
           {scanning && (
             <div className="sidebar-empty">
               {/* <div className="big-spin">🛸</div> */}
-              <div>Drone scanning ZIP {zip}…</div>
-              <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>Detecting trash hotspots via YOLO</div>
+              {/* <div>Drone scanning ZIP {zip}…</div> */}
+              <div>Detecting trash zones nearby...</div>
+              {/* <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>Detecting trash zones nearby</div> */}
             </div>
           )}
           {scanDone && !scanning && allHotspots.length === 0 && (
@@ -863,22 +933,36 @@ const cardRefs = useRef({});
 // ── ROOT ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const dashRef = useRef(null);
+  const titleRef = useRef(null);
   const [started, setStarted] = useState(false);
 
   useEffect(() => {
     window.scrollTo(0, 0);
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
   }, []);
 
   const scrollToDash = () => {
     setStarted(true);
+    // Scroll to dashboard
     setTimeout(() => {
       dashRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, 50);
+    // After scroll completes, collapse title page so user can't scroll back
+    setTimeout(() => {
+      if (titleRef.current) {
+        titleRef.current.style.height = '0';
+        titleRef.current.style.minHeight = '0';
+        titleRef.current.style.overflow = 'hidden';
+        titleRef.current.style.opacity = '0';
+      }
+    }, 1100);
   };
 
   return (
     <div>
-      {!started && <TitlePage onEnter={scrollToDash} />}
+      <div ref={titleRef}>
+        <TitlePage onEnter={scrollToDash} />
+      </div>
       <div ref={dashRef}>
         <Dashboard />
       </div>
