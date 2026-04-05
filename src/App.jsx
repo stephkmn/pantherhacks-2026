@@ -287,12 +287,20 @@ function PhotoModal({ hotspot, onClose, disposalSites, disposalLoading, disposal
             {!disposalLoading && !disposalError && disposalSites.length > 0 && (
               <div className="modal-disposal-list">
                 {disposalSites.map((site) => (
-                  <div key={site.site_id} className="modal-disposal-item">
+                  <a
+                    key={site.site_id}
+                    className="modal-disposal-item"
+                    href={site.maps_url || `https://www.google.com/maps/search/?api=1&query=${site.lat},${site.lng}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Open in Google Maps"
+                  >
                     <div className="modal-disposal-name">{site.name}</div>
                     <div className="modal-disposal-meta">
                       {site.site_type.replace(/_/g, ' ')} · {Number(site.distance_km || 0).toFixed(2)} km · {site.hours}
                     </div>
-                  </div>
+                    {site.address && <div className="modal-disposal-meta">{site.address}</div>}
+                  </a>
                 ))}
               </div>
             )}
