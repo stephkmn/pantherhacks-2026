@@ -762,20 +762,22 @@ function Dashboard() {
 // ── ROOT ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const dashRef = useRef(null);
-  const topRef = useRef(null);
+  const [started, setStarted] = useState(false);
 
-  // Always scroll to top on reload
   useEffect(() => {
     window.scrollTo(0, 0);
   }, []);
 
   const scrollToDash = () => {
-    dashRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setStarted(true);
+    setTimeout(() => {
+      dashRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 50);
   };
 
   return (
-    <div ref={topRef}>
-      <TitlePage onEnter={scrollToDash} />
+    <div>
+      {!started && <TitlePage onEnter={scrollToDash} />}
       <div ref={dashRef}>
         <Dashboard />
       </div>
