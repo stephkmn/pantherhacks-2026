@@ -932,32 +932,54 @@ scanned.forEach((hotspot, i) => {
 }
 
 function MobileDetectorDemo() {
-  const fileInputRef = useRef(null);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+  const watchIdRef = useRef(null);
+  const detectLoopRef = useRef(null);
+  const detectInFlightRef = useRef(false);
+  const latRef = useRef('');
+  const lngRef = useRef('');
+  const uploadCooldownRef = useRef(0);
   const [ingestKey, setIngestKey] = useState('');
   const [droneId, setDroneId] = useState('phone_demo');
   const [roundDraft, setRoundDraft] = useState(buildDefaultRoundId);
   const [roundId, setRoundId] = useState('');
   const [sessionError, setSessionError] = useState('');
   const [sessionStarting, setSessionStarting] = useState(false);
-  const [captureFile, setCaptureFile] = useState(null);
-  const [previewUrl, setPreviewUrl] = useState('');
   const [lat, setLat] = useState('');
   const [lng, setLng] = useState('');
   const [locationLabel, setLocationLabel] = useState('Location not captured yet');
   const [locating, setLocating] = useState(false);
+  const [liveMode, setLiveMode] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [detectError, setDetectError] = useState('');
   const [result, setResult] = useState(null);
+  const [toastMessage, setToastMessage] = useState('');
 
   useEffect(() => {
-    if (!captureFile) {
-      setPreviewUrl('');
-      return undefined;
+    latRef.current = lat.trim();
+    lngRef.current = lng.trim();
+  }, [lat, lng]);
+
+  useEffect(() => {
+    if (!toastMessage) return undefined;
+    const timeoutId = window.setTimeout(() => setToastMessage(''), 3200);
+    return () => window.clearTimeout(timeoutId);
+  }, [toastMessage]);
+
+  useEffect(() => () => {
+    if (detectLoopRef.current) {
+      window.clearInterval(detectLoopRef.current);
     }
-    const nextUrl = URL.createObjectURL(captureFile);
-    setPreviewUrl(nextUrl);
-    return () => URL.revokeObjectURL(nextUrl);
-  }, [captureFile]);
+    if (watchIdRef.current !== null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+    }
+  }, []);
 
   const captureLocation = async () => {
     if (!navigator.geolocation) {
@@ -989,6 +1011,32 @@ function MobileDetectorDemo() {
     }
   };
 
+  const beginLocationWatch = () => {
+    if (!navigator.geolocation || watchIdRef.current !== null) {
+      return;
+    }
+
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      (position) => {
+        const nextLat = position.coords.latitude.toFixed(6);
+        const nextLng = position.coords.longitude.toFixed(6);
+        setLat(nextLat);
+        setLng(nextLng);
+        latRef.current = nextLat;
+        lngRef.current = nextLng;
+        setLocationLabel(`Live GPS locked: ${nextLat}, ${nextLng}`);
+      },
+      () => {
+        setLocationLabel('Live GPS lost. Using the last known coordinates.');
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 5000,
+        timeout: 10000,
+      },
+    );
+  };
+
   const ensureSession = async () => {
     if (roundId) return roundId;
     if (!ingestKey.trim()) {
@@ -1014,41 +1062,98 @@ function MobileDetectorDemo() {
     }
   };
 
-  const handleFileChange = (event) => {
-    const nextFile = event.target.files?.[0];
-    if (!nextFile) return;
-    setCaptureFile(nextFile);
-    setDetectError('');
-    setResult(null);
+  const startCamera = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error('Camera access is unavailable in this browser.');
+    }
+    if (streamRef.current) {
+      return streamRef.current;
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+      },
+      audio: false,
+    });
+    streamRef.current = stream;
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play();
+    }
+    setCameraReady(true);
+    return stream;
   };
 
-  const runDetection = async () => {
-    if (!captureFile) {
-      setDetectError('Take a photo first so we have an image to analyze.');
-      return;
+  const stopLiveScan = () => {
+    setLiveMode(false);
+    setDetecting(false);
+    setCameraReady(false);
+    detectInFlightRef.current = false;
+
+    if (detectLoopRef.current) {
+      window.clearInterval(detectLoopRef.current);
+      detectLoopRef.current = null;
     }
-    if (!droneId.trim()) {
-      setDetectError('Set a device label so the trash entry has a source.');
+
+    if (watchIdRef.current !== null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  };
+
+  const captureFrameAndDetect = async () => {
+    if (detectInFlightRef.current || !videoRef.current || !canvasRef.current) {
       return;
     }
 
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video.videoWidth || !video.videoHeight) {
+      return;
+    }
+
+    let activeLat = latRef.current;
+    let activeLng = lngRef.current;
+    if (!activeLat || !activeLng) {
+      const gps = await captureLocation();
+      activeLat = gps?.lat || activeLat;
+      activeLng = gps?.lng || activeLng;
+    }
+    if (!activeLat || !activeLng) {
+      setDetectError('Location is required to upload trash entries. Enable GPS or enter coordinates manually.');
+      return;
+    }
+
+    detectInFlightRef.current = true;
     setDetecting(true);
     setDetectError('');
+
     try {
       const activeRoundId = await ensureSession();
-      let activeLat = lat.trim();
-      let activeLng = lng.trim();
-      if (!activeLat || !activeLng) {
-        const gps = await captureLocation();
-        activeLat = gps?.lat || activeLat;
-        activeLng = gps?.lng || activeLng;
-      }
-      if (!activeLat || !activeLng) {
-        throw new Error('Location is required to create a trash entry. Allow GPS or enter lat/lng manually.');
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const context = canvas.getContext('2d');
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const blob = await new Promise((resolve) => {
+        canvas.toBlob(resolve, 'image/jpeg', 0.84);
+      });
+      if (!blob) {
+        throw new Error('Unable to capture the current camera frame.');
       }
 
       const formData = new FormData();
-      formData.append('file', captureFile);
+      formData.append('file', blob, `live-detection-${Date.now()}.jpg`);
       formData.append('round_id', activeRoundId);
       formData.append('drone_id', droneId.trim());
       formData.append('lat', activeLat);
@@ -1061,10 +1166,49 @@ function MobileDetectorDemo() {
         },
       });
       setResult(response.data);
+
+      if (response.data.persisted_detection_count > 0) {
+        const now = Date.now();
+        if (now - uploadCooldownRef.current > 5000) {
+          uploadCooldownRef.current = now;
+          setToastMessage(
+            `Uploaded ${response.data.persisted_detection_count} trash entr${response.data.persisted_detection_count === 1 ? 'y' : 'ies'} to the database.`,
+          );
+        }
+      }
     } catch (error) {
       setDetectError(error?.response?.data?.error?.message || error.message || 'Detection failed.');
     } finally {
+      detectInFlightRef.current = false;
       setDetecting(false);
+    }
+  };
+
+  const startLiveScan = async () => {
+    if (!droneId.trim()) {
+      setDetectError('Set a device label so the trash entry has a source.');
+      return;
+    }
+
+    setDetectError('');
+    try {
+      await ensureSession();
+      await captureLocation();
+      beginLocationWatch();
+      await startCamera();
+      setLiveMode(true);
+      setToastMessage('Live trash detection started.');
+      await captureFrameAndDetect();
+
+      if (detectLoopRef.current) {
+        window.clearInterval(detectLoopRef.current);
+      }
+      detectLoopRef.current = window.setInterval(() => {
+        captureFrameAndDetect();
+      }, 2500);
+    } catch (error) {
+      setDetectError(error?.message || 'Unable to start live detection.');
+      stopLiveScan();
     }
   };
 
@@ -1072,9 +1216,9 @@ function MobileDetectorDemo() {
     <div className="mobile-demo">
       <div className="mobile-demo__hero">
         <div className="mobile-demo__eyebrow">Phone Trash Demo</div>
-        <h1>Walk the building, snap trash, and upload every hit.</h1>
+        <h1>Walk the building while the camera catches trash live.</h1>
         <p>
-          Use your phone camera, run the vision model on the backend, then save the photo and trash entries in one flow.
+          Start the live feed, point the camera at litter, and each confirmed detection will upload a photo plus a trash entry.
         </p>
       </div>
 
@@ -1105,29 +1249,22 @@ function MobileDetectorDemo() {
         <div className="mobile-demo__session">
           <div>{roundId ? `Active round: ${roundId}` : 'No round started yet'}</div>
           <div>{locationLabel}</div>
+          <div>{liveMode ? 'Live detection is running' : 'Live detection is stopped'}</div>
           {sessionError && <div className="mobile-demo__error">{sessionError}</div>}
         </div>
       </div>
 
       <div className="mobile-demo__panel">
         <div className="mobile-demo__actions">
-          <button className="mobile-demo__button" onClick={() => fileInputRef.current?.click()}>
-            {captureFile ? 'Retake Photo' : 'Take Photo'}
+          <button className="mobile-demo__button" onClick={liveMode ? stopLiveScan : startLiveScan}>
+            {liveMode ? 'Stop Live Scan' : 'Start Live Scan'}
           </button>
           <button className="mobile-demo__button mobile-demo__button--secondary" onClick={captureLocation} disabled={locating}>
             {locating ? 'Finding GPS...' : 'Use Current Location'}
           </button>
-          <button className="mobile-demo__button" onClick={runDetection} disabled={detecting || !captureFile}>
-            {detecting ? 'Detecting...' : 'Detect Trash'}
+          <button className="mobile-demo__button mobile-demo__button--secondary" onClick={captureFrameAndDetect} disabled={!liveMode || detecting}>
+            {detecting ? 'Detecting...' : 'Scan Frame Now'}
           </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={handleFileChange}
-            style={{ display: 'none' }}
-          />
         </div>
 
         <div className="mobile-demo__grid">
@@ -1144,31 +1281,39 @@ function MobileDetectorDemo() {
         {detectError && <div className="mobile-demo__error">{detectError}</div>}
 
         <div className="mobile-demo__preview">
-          {previewUrl ? (
-            <div className="mobile-demo__image-wrap">
-              <img src={previewUrl} alt="Captured trash scan" className="mobile-demo__image" />
-              {result?.detections?.map((det, index) => {
-                const [x1, y1, x2, y2] = det.bbox;
-                const [width, height] = result.image_size || [1, 1];
-                return (
-                  <div
-                    key={`${det.class_name || det.class}-${index}`}
-                    className="mobile-demo__bbox"
-                    style={{
-                      left: `${(x1 / width) * 100}%`,
-                      top: `${(y1 / height) * 100}%`,
-                      width: `${((x2 - x1) / width) * 100}%`,
-                      height: `${((y2 - y1) / height) * 100}%`,
-                    }}
-                  >
-                    <span>{det.class_name || det.class} {(Number(det.confidence) * 100).toFixed(0)}%</span>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="mobile-demo__placeholder">Your captured image will appear here.</div>
-          )}
+          <div className="mobile-demo__image-wrap mobile-demo__image-wrap--live">
+            <video ref={videoRef} className="mobile-demo__video" playsInline muted autoPlay />
+            {!cameraReady && (
+              <div className="mobile-demo__placeholder">
+                Start the live scan to open the rear camera and begin watching for trash.
+              </div>
+            )}
+            {result?.detections?.map((det, index) => {
+              const [x1, y1, x2, y2] = det.bbox;
+              const [width, height] = result.image_size || [1, 1];
+              return (
+                <div
+                  key={`${det.class_name || det.class}-${index}`}
+                  className="mobile-demo__bbox"
+                  style={{
+                    left: `${(x1 / width) * 100}%`,
+                    top: `${(y1 / height) * 100}%`,
+                    width: `${((x2 - x1) / width) * 100}%`,
+                    height: `${((y2 - y1) / height) * 100}%`,
+                  }}
+                >
+                  <span>{det.class_name || det.class} {(Number(det.confidence) * 100).toFixed(0)}%</span>
+                </div>
+              );
+            })}
+            {liveMode && (
+              <div className="mobile-demo__live-pill">
+                <span className="mobile-demo__live-dot" />
+                {detecting ? 'Scanning frame...' : 'Live'}
+              </div>
+            )}
+          </div>
+          <canvas ref={canvasRef} style={{ display: 'none' }} />
         </div>
       </div>
 
@@ -1202,6 +1347,7 @@ function MobileDetectorDemo() {
           )}
         </div>
       )}
+      {toastMessage && <div className="mobile-demo__toast">{toastMessage}</div>}
     </div>
   );
 }

@@ -176,6 +176,7 @@ html {
   font-family: var(--font-display);
   font-size: 0.95rem;
   font-weight: 700;
+  cursor: pointer;
 }
 
 .mobile-demo__button--secondary {
@@ -206,10 +207,26 @@ html {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.mobile-demo__image-wrap--live {
+  min-height: 360px;
+  background:
+    linear-gradient(180deg, rgba(3, 8, 14, 0.05), rgba(3, 8, 14, 0.55)),
+    rgba(255, 255, 255, 0.03);
+}
+
 .mobile-demo__image {
   display: block;
   width: 100%;
   height: auto;
+}
+
+.mobile-demo__video {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 360px;
+  object-fit: cover;
+  background: #02060b;
 }
 
 .mobile-demo__bbox {
@@ -241,6 +258,9 @@ html {
   background: rgba(255, 255, 255, 0.02);
   text-align: center;
   padding: 24px;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
 }
 
 .mobile-demo__result-header,
@@ -279,6 +299,62 @@ html {
 .mobile-demo__link {
   display: block;
   margin-top: 14px;
+}
+
+.mobile-demo__live-pill {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(7, 12, 19, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  backdrop-filter: blur(10px);
+}
+
+.mobile-demo__live-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff4d4d;
+  box-shadow: 0 0 0 0 rgba(255, 77, 77, 0.65);
+  animation: mobileDemoPulse 1.4s infinite;
+}
+
+.mobile-demo__toast {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  width: min(calc(100% - 24px), 520px);
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(12, 27, 19, 0.94);
+  border: 1px solid rgba(124, 255, 112, 0.28);
+  color: #d9ffe0;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.32);
+  z-index: 30;
+  text-align: center;
+  font-weight: 600;
+}
+
+@keyframes mobileDemoPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 77, 77, 0.65);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(255, 77, 77, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 77, 77, 0);
+  }
 }
 
 @media (min-width: 720px) {

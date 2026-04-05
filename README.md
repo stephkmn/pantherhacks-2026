@@ -1,92 +1,150 @@
-# PantherHacks 2026 MVP
+# SkySweep
 
-## Environment
+SkySweep is a trash-detection and cleanup coordination platform built for PantherHacks 2026. It combines computer vision, live geotagged image capture, hotspot scoring, and routing into a single workflow so teams can find litter faster and respond more efficiently.
 
-Use `.env` for backend variables only.
+The project started from a simple question: what if waste detection worked more like a live operations system instead of a manual reporting form? SkySweep treats trash as a field-detection problem. A drone, phone camera, or uploaded image can be analyzed for visible waste, mapped to a real location, and turned into actionable cleanup data.
+
+## What It Does
+
+SkySweep helps users:
+
+- detect trash in images using a YOLO-based computer vision pipeline
+- capture photos of detected trash and upload them to cloud storage
+- create geotagged `trash_entries` that can be viewed and analyzed later
+- cluster nearby trash reports into hotspots
+- estimate waste volume, cleanup time, and severity
+- generate cleanup routes through active hotspots
+- suggest nearby disposal sites for collected waste
+
+In the current demo flow, a user can open the mobile camera experience, walk around a building, and let the app watch for trash in a live feed. When trash is detected, the interface draws bounding boxes on screen, uploads the captured frame, writes the detection to the database, and shows a confirmation notification.
+
+## Why It Matters
+
+Litter is easy to ignore when reporting is slow, inconsistent, or entirely manual. That leads to delayed cleanup, poor visibility into problem areas, and wasted time for teams trying to respond. SkySweep turns scattered observations into structured environmental data.
+
+Instead of asking someone to remember where trash was seen and describe it later, the system captures:
+
+- where the trash was found
+- when it was found
+- what the camera saw
+- how severe the area appears to be
+- how to prioritize cleanup
+
+This makes the project useful not just as a demo, but as a foundation for campus cleanup operations, municipal pilot programs, park monitoring, and autonomous drone inspections.
+
+## How It Works
+
+SkySweep has two main parts:
+
+1. Frontend
+
+The React frontend provides:
+
+- a dashboard for scanning ZIP codes and viewing hotspots on a map
+- route visualization for cleanup planning
+- hotspot detail views with waste estimates and nearby disposal sites
+- a mobile live-camera demo mode for real-time trash detection
+
+2. Backend
+
+The FastAPI backend provides:
+
+- image detection endpoints
+- ingest-protected write endpoints for rounds, drone positions, and trash entries
+- hotspot aggregation and scoring
+- disposal-site lookup
+- integration with Supabase storage and database services
+
+When a detection image is uploaded, the backend can:
+
+- run the YOLO detector
+- estimate detected trash quantity
+- upload the image to the storage bucket
+- create one or more `trash_entries`
+- expose the saved photo URL and detection metadata back to the client
+
+## Demo Experience
+
+SkySweep supports multiple ways to demonstrate the system:
+
+- ZIP scan mode: simulate area scans and visualize hotspots on the dashboard
+- image detection mode: upload a trash image and persist detections
+- mobile live demo: use a phone camera as a stand-in for a drone feed
+
+The mobile live demo is especially helpful for showing the real product vision. It mimics how an aerial or moving camera system could continuously detect litter, mark it visually, and write findings into the platform as the operator moves through a space.
+
+## Tech Stack
+
+- React + Vite frontend
+- FastAPI backend
+- YOLO / Ultralytics-based image detection
+- Supabase database and storage
+- Leaflet for mapping
+
+## Project Vision
+
+SkySweep is designed as more than a map of trash pins. The long-term goal is an environmental operations tool that helps communities identify waste buildup early, prioritize cleanup resources, and build a clearer picture of recurring pollution patterns.
+
+Future directions could include:
+
+- true drone video ingestion
+- real-time streaming inference
+- autonomous patrol routes
+- trend analysis across time and geography
+- alerts for newly formed hotspots
+- cleaner handoff from detection to cleanup crews
+
+## Running It Locally
+
+If you want to explore the project yourself:
+
+1. Create a `.env` file with backend credentials.
+2. Start the app with:
+
+```bash
+./scripts/start-local.sh
+```
+
+This launches:
+
+- the FastAPI backend on `http://localhost:8000`
+- the Vite frontend on `http://localhost:5173`
+
+## Environment Variables
 
 Required:
+
 - `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY` (backend-only, never expose to frontend code)
+- `SUPABASE_SERVICE_ROLE_KEY`
 - `INGEST_API_KEY`
 
 Optional:
-- `SUPABASE_STORAGE_BUCKET` (default: `drone-images`)
-- `SUPABASE_STORAGE_SIGNED_URL_TTL_SECONDS` (0 = public URL)
+
+- `SUPABASE_STORAGE_BUCKET`
+- `SUPABASE_STORAGE_SIGNED_URL_TTL_SECONDS`
 - `YOLO_MODEL_PATH`
 - `ENABLE_HOURLY_ROUND_AUTOMATION`
 - `AUTO_ROUND_PREFIX`
-- `VITE_GOOGLE_MAPS_API_KEY` (optional, for higher-reliability Street View images in frontend)
+- `VITE_GOOGLE_MAPS_API_KEY`
+- `ngrok_url` or `NGROK_URL`
 
-### Dev vs Prod
-- Dev: set `ENABLE_HOURLY_ROUND_AUTOMATION=false`
-- Prod: set `ENABLE_HOURLY_ROUND_AUTOMATION=true` and schedule DB job with `public.start_new_round_auto()` via `pg_cron`.
+## API Overview
 
-## Start Scripts
+Some of the main backend endpoints include:
 
-- Local dev (backend + frontend):
-  - `./scripts/start-local.sh`
-- Production-like run (build + serve + backend):
-  - `./scripts/start-prod.sh`
+- `POST /api/detect-image`
+- `POST /api/trash-entry`
+- `POST /api/rounds/start`
+- `POST /api/drone-position`
+- `GET /api/hotspots`
+- `GET /api/disposal-sites/nearby`
+- `POST /api/optimize-route`
 
-## Ingest Auth
+Protected ingest endpoints require either:
 
-Write endpoints require auth via either:
 - `X-API-Key: <INGEST_API_KEY>`
 - `Authorization: Bearer <INGEST_API_KEY>`
 
-Protected endpoints:
-- `POST /api/rounds/start`
-- `POST /api/drone-position`
-- `POST /api/trash-entry`
-- `POST /api/detect-image`
+## Team
 
-## MVP Acceptance Runbook
-
-1. Apply SQL migration and seed data:
-- `backend/supabase/migrations/001_hourly_drone_trash.sql`
-- `backend/supabase/seeds/seed_orange_county_zip_centroids.sql`
-- `backend/supabase/seeds/seed_bay_area_zip_centroids.sql`
-- `backend/supabase/seeds/seed_trash_entries_from_zip_centroids.sql`
-- `backend/supabase/seeds/seed_demo_high_density_hotspots.sql` (optional demo: dense red/yellow multi-hotspot ZIPs)
-
-Optional: regenerate irregular demo hotspots with Python random:
-- `python backend/supabase/generate_demo_hotspots_seed.py --seed 20260405`
-
-2. Start app:
-- `./scripts/start-local.sh`
-
-3. Scan ZIP in UI:
-- Open app and scan `92801`.
-- Verify hotspot cards show API metric values and real photo URLs.
-
-4. Insert a new trash entry via API:
-```bash
-curl -X POST http://localhost:8000/api/trash-entry \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: dev-ingest-key" \
-  -d '{
-    "round_id":"round_manual_1",
-    "drone_id":"drone_1",
-    "lat":33.8428,
-    "lng":-117.9546,
-    "size":8,
-    "meta":{"photo_url":"https://example.com/test.jpg"}
-  }'
-```
-
-5. (Optional) Upload image and persist detections:
-```bash
-curl -X POST http://localhost:8000/api/detect-image \
-  -H "X-API-Key: dev-ingest-key" \
-  -F "file=@backend/tests/test_images/garbage_1.jpg" \
-  -F "round_id=round_manual_1" \
-  -F "drone_id=drone_1" \
-  -F "lat=33.8428" \
-  -F "lng=-117.9546"
-```
-
-6. Re-scan same ZIP in UI:
-- Verify hotspot score/color and image reflect newly inserted entries.
-
-7. Route behavior:
-- Use skip/restore in UI and confirm route updates.
+Built for PantherHacks 2026 as a prototype for smarter, faster environmental cleanup coordination.
