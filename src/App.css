@@ -159,38 +159,28 @@ body {
 .title-cta:active { transform: translateY(0); }
 
 /* Floating drone */
-.drone-float {
-  position: absolute;
-  top: 12%;
-  right: 8%;
-  z-index: 3;
-  animation: droneFloat 4s ease-in-out infinite;
+/* Flying drone */
+.drone-fly {
+  position: fixed;
+  z-index: 10;
+  pointer-events: none;
+  filter: drop-shadow(0 0 12px rgba(0, 229, 255, 0.8));
+  transition: left 1.6s cubic-bezier(0.45, 0, 0.55, 1),
+              top  1.6s cubic-bezier(0.45, 0, 0.55, 1),
+              transform 1.6s ease;
 }
-@keyframes droneFloat {
-  0%, 100% { transform: translateY(0) rotate(-4deg); }
-  50% { transform: translateY(-18px) rotate(4deg); }
-}
-.drone-body {
-  font-size: clamp(3rem, 6vw, 5rem);
-  filter: drop-shadow(0 0 20px var(--sky));
-  position: relative;
-  z-index: 1;
-}
-.drone-ring {
+
+.drone-fly-ring {
   position: absolute;
   top: 50%; left: 50%;
   transform: translate(-50%, -50%);
   border-radius: 50%;
   border: 1px solid var(--sky);
-  animation: droneRing 2.4s ease-out infinite;
+  animation: droneRing 2s ease-out infinite;
+  pointer-events: none;
 }
-.ring1 { width: 80px; height: 80px; animation-delay: 0s; }
-.ring2 { width: 120px; height: 120px; animation-delay: 0.6s; }
-@keyframes droneRing {
-  0%   { opacity: 0.7; transform: translate(-50%,-50%) scale(0.6); }
-  100% { opacity: 0; transform: translate(-50%,-50%) scale(1.5); }
-}
-
+.drone-fly-ring.r1 { width: 70px;  height: 70px;  animation-delay: 0s; }
+.drone-fly-ring.r2 { width: 110px; height: 110px; animation-delay: 0.5s; }
 /* ── DASHBOARD ────────────────────────────────────────────────────────────── */
 .dashboard {
   display: flex;
