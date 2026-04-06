@@ -176,6 +176,31 @@ class CleanSkyApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["error"]["code"], "INVALID_CONTENT_TYPE")
 
+    def test_demo_round_start_does_not_require_api_key(self):
+        response = self.client.post("/api/demo-rounds/start", json={"drone_round_id": "demo_round_public"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["id"], "demo_round_public")
+
+    def test_demo_detect_image_does_not_require_api_key(self):
+        image = Image.new("RGB", (64, 64), color="white")
+        bytes_buffer = io.BytesIO()
+        image.save(bytes_buffer, format="PNG")
+        bytes_buffer.seek(0)
+
+        response = self.client.post(
+            "/api/demo-detect-image",
+            files={"file": ("sample.png", bytes_buffer, "image/png")},
+            data={
+                "round_id": "demo_round_public",
+                "drone_id": "phone_demo_public",
+                "lat": "33.8446",
+                "lng": "-117.9539",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("persisted_detection_count", payload)
+
     def test_create_community_session(self):
         response = self.client.post("/api/community-sessions")
         self.assertEqual(response.status_code, 200)
@@ -185,6 +210,16 @@ class CleanSkyApiTests(unittest.TestCase):
         self.assertEqual(payload["max_uploads"], 2)
         self.assertEqual(payload["uploads_used"], 0)
         self.assertEqual(payload["uploads_remaining"], 2)
+
+    def test_create_community_session_survives_round_bootstrap_failure(self):
+        with patch("backend.main._data_store") as data_store_factory:
+            data_store_factory.return_value.start_new_round.side_effect = RuntimeError("offline")
+            response = self.client.post("/api/community-sessions")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("session_id", payload)
+        self.assertIn("round_id", payload)
 
     def test_community_upload_persists_without_api_key(self):
         session_response = self.client.post("/api/community-sessions")

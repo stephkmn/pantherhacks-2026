@@ -957,35 +957,33 @@ function CommunitySharePage() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const createSession = async (ignore = false) => {
+    setLoading(true);
+    setError('');
+    try {
+      const response = await axios.post('/api/community-sessions');
+      if (ignore) return;
+      const payload = response.data;
+      const uploadUrl = buildDemoUrl('community-upload', { session: payload.session_id });
+      setSession({
+        ...payload,
+        uploadUrl,
+        qrCodeUrl: buildQrCodeUrl(uploadUrl),
+      });
+    } catch (err) {
+      if (!ignore) {
+        setError(err?.response?.data?.error?.message || 'Unable to create a community upload session.');
+      }
+    } finally {
+      if (!ignore) {
+        setLoading(false);
+      }
+    }
+  };
 
   useEffect(() => {
     let ignore = false;
-
-    const createSession = async () => {
-      setLoading(true);
-      setError('');
-      try {
-        const response = await axios.post('/api/community-sessions');
-        if (ignore) return;
-        const payload = response.data;
-        const uploadUrl = buildDemoUrl('community-upload', { session: payload.session_id });
-        setSession({
-          ...payload,
-          uploadUrl,
-          qrCodeUrl: buildQrCodeUrl(uploadUrl),
-        });
-      } catch (err) {
-        if (!ignore) {
-          setError(err?.response?.data?.error?.message || 'Unable to create a community upload session.');
-        }
-      } finally {
-        if (!ignore) {
-          setLoading(false);
-        }
-      }
-    };
-
-    createSession();
+    createSession(ignore);
     return () => {
       ignore = true;
     };
@@ -1002,7 +1000,14 @@ function CommunitySharePage() {
       </div>
       <div className="mobile-demo__panel community-share__panel">
         {loading && <div className="mobile-demo__placeholder community-share__placeholder">Generating a QR code...</div>}
-        {!loading && error && <div className="mobile-demo__error">{error}</div>}
+        {!loading && error && (
+          <>
+            <div className="mobile-demo__error">{error}</div>
+            <button type="button" className="mobile-demo__button mobile-demo__button--secondary" onClick={() => createSession(false)}>
+              Try Again
+            </button>
+          </>
+        )}
         {!loading && session && (
           <>
             <img src={session.qrCodeUrl} alt="Community upload QR code" className="community-share__qr" />
@@ -1405,17 +1410,17 @@ function MobileDetectorDemo() {
 
   const ensureSession = async () => {
     if (roundId) return roundId;
-    if (!ingestKey.trim()) {
-      throw new Error('Enter the ingest API key before starting the phone demo.');
-    }
 
     setSessionStarting(true);
     setSessionError('');
     try {
+      const useProtectedIngest = Boolean(ingestKey.trim());
       const response = await axios.post(
-        '/api/rounds/start',
+        useProtectedIngest ? '/api/rounds/start' : '/api/demo-rounds/start',
         { drone_round_id: roundDraft.trim() || buildDefaultRoundId() },
-        { headers: { 'X-API-Key': ingestKey.trim() } },
+        useProtectedIngest
+          ? { headers: { 'X-API-Key': ingestKey.trim() } }
+          : undefined,
       );
       setRoundId(response.data.id);
       return response.data.id;
@@ -1526,11 +1531,18 @@ function MobileDetectorDemo() {
       formData.append('lng', activeLng);
       formData.append('detected_at', new Date().toISOString());
 
-      const response = await axios.post('/api/detect-image', formData, {
-        headers: {
-          'X-API-Key': ingestKey.trim(),
-        },
-      });
+      const useProtectedIngest = Boolean(ingestKey.trim());
+      const response = await axios.post(
+        useProtectedIngest ? '/api/detect-image' : '/api/demo-detect-image',
+        formData,
+        useProtectedIngest
+          ? {
+              headers: {
+                'X-API-Key': ingestKey.trim(),
+              },
+            }
+          : undefined,
+      );
       setResult(response.data);
 
       if (response.data.persisted_detection_count > 0) {
@@ -1591,12 +1603,12 @@ function MobileDetectorDemo() {
       <div className="mobile-demo__panel">
         <div className="mobile-demo__grid">
           <label className="mobile-demo__field">
-            <span>Ingest API Key</span>
+            <span>Ingest API Key (Optional)</span>
             <input
               type="password"
               value={ingestKey}
               onChange={(event) => setIngestKey(event.target.value)}
-              placeholder="dev-ingest-key"
+              placeholder="Leave blank for public demo mode"
               autoComplete="off"
             />
           </label>

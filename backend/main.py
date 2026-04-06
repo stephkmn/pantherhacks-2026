@@ -430,6 +430,18 @@ async def start_round(payload: RoundStartRequest):
     )
 
 
+@app.post("/api/demo-rounds/start", response_model=RoundResponse)
+async def start_demo_round(payload: RoundStartRequest):
+    round_id = payload.drone_round_id or f"demo_round_{uuid4().hex[:12]}"
+    round_model = _data_store().start_new_round(round_id=round_id)
+    return RoundResponse(
+        id=round_model.id,
+        started_at=round_model.started_at,
+        ended_at=round_model.ended_at,
+        status=round_model.status,
+    )
+
+
 @app.post("/api/drone-position", response_model=DronePositionResponse, dependencies=[Depends(require_ingest_auth)])
 async def upsert_drone_position(payload: DronePositionUpsertRequest):
     record = _data_store().upsert_drone_position(
@@ -475,10 +487,15 @@ async def create_trash_entry(payload: TrashEntryCreateRequest):
 async def create_community_session():
     session_id = f"community_{uuid4().hex[:12]}"
     round_id = f"community_round_{uuid4().hex[:12]}"
-    round_model = _data_store().start_new_round(round_id=round_id)
+    try:
+        round_model = _data_store().start_new_round(round_id=round_id)
+        resolved_round_id = round_model.id
+    except Exception:
+        # Keep the public QR flow available even if round bootstrapping is flaky.
+        resolved_round_id = round_id
     session_data = {
         "session_id": session_id,
-        "round_id": round_model.id,
+        "round_id": resolved_round_id,
         "created_at": datetime.now(timezone.utc),
         "uploads_used": 0,
         "max_uploads": COMMUNITY_MAX_UPLOADS,
@@ -786,6 +803,63 @@ async def detect_trash_in_image(
             detected_at=detected_at,
             source="detect-image",
         )
+
+    yolo_result["photo_url"] = photo_url
+    yolo_result["persisted_entries"] = persisted_entries
+    yolo_result["persisted_detection_count"] = len(persisted_entries)
+    yolo_result["persistence_skipped_reason"] = persistence_skipped_reason
+    return yolo_result
+
+
+@app.post(
+    "/api/demo-detect-image",
+    response_model=DetectImageResponse,
+    responses={
+        400: {
+            "model": ErrorEnvelope,
+            "description": "Invalid input file type or missing payload.",
+        }
+    },
+)
+async def detect_trash_in_image_demo(
+    file: UploadFile = File(...),
+    round_id: str | None = Form(default=None),
+    drone_id: str | None = Form(default=None),
+    lat: float | None = Form(default=None),
+    lng: float | None = Form(default=None),
+    detected_at: datetime | None = Form(default=None),
+):
+    contents = await file.read()
+    _ensure_image_upload(file, contents)
+    yolo_result = _run_detection(contents, file.filename or "uploaded-image")
+    mapped_detections = yolo_result["detections"]
+
+    effective_round_id = round_id or f"demo_round_{uuid4().hex[:12]}"
+    effective_drone_id = drone_id or "phone_demo_public"
+    effective_lat = float(lat) if lat is not None else None
+    effective_lng = float(lng) if lng is not None else None
+
+    if effective_lat is None or effective_lng is None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "MISSING_INGEST_FIELDS",
+                "message": "lat and lng are required to persist demo detections.",
+            },
+        )
+
+    photo_url, persisted_entries, persistence_skipped_reason = _persist_detection_entries(
+        image_bytes=contents,
+        filename=file.filename or "uploaded-image",
+        detections=mapped_detections,
+        image_size=yolo_result["image_size"],
+        round_id=effective_round_id,
+        drone_id=effective_drone_id,
+        lat=effective_lat,
+        lng=effective_lng,
+        detected_at=detected_at,
+        source="demo-detect-image",
+    )
 
     yolo_result["photo_url"] = photo_url
     yolo_result["persisted_entries"] = persisted_entries
