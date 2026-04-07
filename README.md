@@ -8,6 +8,14 @@ The system uses camera input from a drone, a phone, or an uploaded image to dete
 
 In the live demo experience, a user can walk around with a phone camera while SkySweep watches for trash, uploads detected frames, and records new trash entries automatically. The result is a project that feels less like a static reporting tool and more like an environmental operations platform.
 
+## Tech Stack
+
+- React + Vite frontend
+- FastAPI backend
+- YOLO / Ultralytics-based image detection
+- Supabase database and storage
+- Leaflet for mapping
+
 ## What It Does
 
 SkySweep helps users:
@@ -77,14 +85,6 @@ SkySweep supports multiple ways to demonstrate the system:
 
 The mobile live demo is especially helpful for showing the real product vision. It mimics how an aerial or moving camera system could continuously detect litter, mark it visually, and write findings into the platform as the operator moves through a space.
 
-## Tech Stack
-
-- React + Vite frontend
-- FastAPI backend
-- YOLO / Ultralytics-based image detection
-- Supabase database and storage
-- Leaflet for mapping
-
 ## Project Vision
 
 SkySweep is designed as more than a map of trash pins. The long-term goal is an environmental operations tool that helps communities identify waste buildup early, prioritize cleanup resources, and build a clearer picture of recurring pollution patterns.
@@ -150,5 +150,4 @@ Protected ingest endpoints require either:
 - `Authorization: Bearer <INGEST_API_KEY>`
 
 ## Team
-
-Built for PantherHacks 2026 as a prototype for smarter, faster environmental cleanup coordination.
+Built by [Stephanie Noe](https://github.com/stephkmn) & [Jasmine Marwaha](https://github.com/jasminemarwaha12) for [PantherHacks 2026](https://devpost.com/software/skysweep) as a prototype for smarter, faster environmental cleanup coordination.
